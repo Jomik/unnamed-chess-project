@@ -1,0 +1,31 @@
+[tools]
+rust = { version = "latest", components = "rust-src, llvm-tools" }
+"cargo:espup" = "latest"
+"cargo:cargo-espflash" = "latest"
+"cargo:ldproxy" = "latest"
+
+[env]
+'_'.source = "~/export-esp.sh"
+
+[hooks]
+enter = '''
+if ! [ -f ~/export-esp.sh ]; then
+    echo "⚠️  ESP toolchain not detected. Run: mise run setup-esp"
+fi
+'''
+
+[tasks.setup-esp]
+description = "Install ESP targets (run once after mise install)"
+run = "espup install"
+
+[tasks.test]
+run = "cargo test"
+
+[tasks.build]
+run = "cargo build --release"
+
+[tasks.flash]
+run = "cargo run --release"
+
+[tasks.monitor]
+run = "espflash monitor"
