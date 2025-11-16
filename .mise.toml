@@ -1,11 +1,13 @@
 [tools]
-rust = { version = "latest", components = "rust-src, llvm-tools" }
+rust = { version = "latest", components = "rust-src, llvm-tools, rust-analyzer" }
 "cargo:espup" = "latest"
 "cargo:cargo-espflash" = "latest"
 "cargo:ldproxy" = "latest"
 
 [env]
 '_'.source = "~/export-esp.sh"
+# Auto-detect host target
+HOST_TARGET = "{{ exec(command='rustc -vV | grep host | cut -d\" \" -f2') }}"
 
 [hooks]
 enter = '''
@@ -18,14 +20,27 @@ fi
 description = "Install ESP targets (run once after mise install)"
 run = "espup install"
 
-[tasks.test]
-run = "cargo test"
 
-[tasks.build]
-run = "cargo build --release"
+[tasks.dev]
+description = "Run development visualization"
+run = "cargo run --features visualization --target $HOST_TARGET"
+
+[tasks.test]
+description = "Run tests on host"
+run = "cargo test --target $HOST_TARGET"
 
 [tasks.flash]
-run = "cargo run --release"
+description = "Flash to ESP32 (uses esp toolchain)"
+run = "cargo +esp espflash flash --release"
+
+[tasks.build]
+description = "Build for ESP32 (uses esp toolchain)"
+run = "cargo +esp build --release"
 
 [tasks.monitor]
+description = "Monitor ESP32 serial output"
 run = "espflash monitor"
+
+[tasks.check-host]
+description = "Show detected host target"
+run = "echo Host target: $HOST_TARGET"
