@@ -1,4 +1,4 @@
-use unnamed_chess_project::{hardware, visualization};
+use unnamed_chess_project::hardware;
 
 #[cfg(target_arch = "xtensa")]
 fn main() {
@@ -13,5 +13,5 @@ fn main() {
 #[cfg(not(target_arch = "xtensa"))]
 fn main() {
     let sensor = hardware::MockPieceSensor::new();
-    visualization::run_interactive_terminal(sensor);
+    unnamed_chess_project::visualization::run_interactive_terminal(sensor);
 }
