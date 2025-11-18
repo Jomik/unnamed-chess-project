@@ -1,8 +1,5 @@
 use super::Bitboard;
 
-/// The number of squares on a chess board (8x8 = 64)
-pub const NUM_SQUARES: usize = 64;
-
 /// A trait for reading piece positions from physical sensors.
 ///
 /// Implementations abstract the hardware interface for detecting chess pieces,

@@ -1,8 +1,4 @@
-mod game_state;
-mod hardware;
-
-#[cfg(not(target_arch = "xtensa"))]
-mod visualization;
+use unnamed_chess_project::{hardware, visualization};
 
 #[cfg(target_arch = "xtensa")]
 fn main() {
