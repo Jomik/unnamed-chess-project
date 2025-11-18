@@ -1,17 +1,23 @@
-use crate::game_state::{Bitboard, PieceSensor};
+use crate::game_state::{Bitboard, PieceSensor, Square};
 
+/// Mock sensor for testing and development on non-ESP32 targets.
+///
+/// Maintains an in-memory bitboard that can be toggled via the terminal interface.
+#[derive(Debug, Clone)]
 pub struct MockPieceSensor {
     bitboard: Bitboard,
 }
 
 impl MockPieceSensor {
+    /// Creates a new mock sensor with an empty board.
     pub fn new() -> Self {
         Self {
             bitboard: Bitboard::new(0),
         }
     }
 
-    pub fn toggle(&mut self, square: crate::game_state::Square) {
+    /// Toggles the piece presence at the given square.
+    pub fn toggle(&mut self, square: Square) {
         self.bitboard.toggle(square);
     }
 }

@@ -2,22 +2,30 @@ use crate::game_state::{PieceSensor, Square};
 use crate::hardware::MockPieceSensor;
 use std::io::{self, Write};
 
-pub fn run_interactive_terminal(mut sensor: MockPieceSensor) {
-    println!("♟️  Chess Board Sensor Simulator");
-    println!("Commands:");
-    println!("  t <square>  - Toggle piece (e.g., 't e2')");
-    println!("  p  - Print board");
-    println!("  q  - Quit");
-    println!();
+/// Clears the screen and moves cursor to top-left.
+fn clear_screen() {
+    print!("\x1B[2J\x1B[H");
+}
 
-    print_board(&mut sensor);
+/// Runs an interactive terminal interface for simulating the chess board sensor.
+///
+/// Allows toggling pieces on squares and visualizing the current board state.
+pub fn run_interactive_terminal(mut sensor: MockPieceSensor) {
+    clear_screen();
+    draw_interface(&mut sensor);
 
     loop {
         print!("> ");
-        io::stdout().flush().unwrap();
+        if let Err(e) = io::stdout().flush() {
+            eprintln!("Failed to flush stdout: {}", e);
+            break;
+        }
 
         let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        if let Err(e) = io::stdin().read_line(&mut input) {
+            eprintln!("Failed to read input: {}", e);
+            break;
+        }
 
         let parts: Vec<&str> = input.split_whitespace().collect();
         if parts.is_empty() {
@@ -28,22 +36,27 @@ pub fn run_interactive_terminal(mut sensor: MockPieceSensor) {
             "t" => {
                 if parts.len() < 2 {
                     println!("Usage: t <square>");
-                    continue;
-                }
-                if let Some(square) = parse_square(parts[1]) {
+                } else if let Some(square) = parse_square(parts[1]) {
                     sensor.toggle(square);
-                    print_board(&mut sensor);
+                    clear_screen();
+                    draw_interface(&mut sensor);
                 } else {
                     println!("Invalid square");
                 }
             }
-            "p" => print_board(&mut sensor),
+            "p" => {
+                clear_screen();
+                draw_interface(&mut sensor);
+            }
             "q" => break,
             _ => println!("Unknown command"),
         }
     }
 }
 
+/// Parses a square notation (e.g., "e4") into a Square.
+///
+/// Accepts algebraic notation: file (a-h) followed by rank (1-8).
 fn parse_square(s: &str) -> Option<Square> {
     if s.len() != 2 {
         return None;
@@ -59,26 +72,37 @@ fn parse_square(s: &str) -> Option<Square> {
     Square::new(idx)
 }
 
-fn print_board(sensor: &mut MockPieceSensor) {
+/// Draws the complete interface: help text and board.
+fn draw_interface(sensor: &mut MockPieceSensor) {
+    println!("♟️  Chess Board Sensor Simulator");
+    println!();
+    println!("Commands: t <square> | p (refresh) | q (quit)");
+    println!();
+    draw_board(sensor);
+}
+
+/// Draws the board display.
+fn draw_board(sensor: &mut MockPieceSensor) {
     let bb = sensor.read_positions();
 
-    println!("\n╔═════════════════════════════╗");
+    println!("╔═════════════════════════════╗");
     println!("║      Piece Positions        ║");
     println!("╠═══╦═════════════════════════╣");
 
     for rank in (0..8).rev() {
         print!("║ {} ║", rank + 1);
         for file in 0..8 {
-            let square = Square::new(rank * 8 + file).unwrap();
-            let bit = 1u64 << square.value();
-            print!(
-                "{}",
-                if bb.value() & bit != 0 {
-                    " ♟ "
-                } else {
-                    " · "
-                }
-            );
+            if let Some(square) = Square::new(rank * 8 + file) {
+                let bit = 1u64 << square.value();
+                print!(
+                    "{}",
+                    if bb.value() & bit != 0 {
+                        " ♟ "
+                    } else {
+                        " · "
+                    }
+                );
+            }
         }
         println!(" ║");
     }
@@ -87,8 +111,12 @@ fn print_board(sensor: &mut MockPieceSensor) {
     println!("║   ║ a  b  c  d  e  f  g  h  ║");
     println!("╚═══╩═════════════════════════╝");
     println!(
-        "\nBitboard: 0x{:016X} | Pieces: {}\n",
+        "Bitboard: 0x{:016X} | Pieces: {}",
         bb.value(),
         bb.value().count_ones()
     );
+
+    if let Err(e) = io::stdout().flush() {
+        eprintln!("Failed to flush stdout: {}", e);
+    }
 }

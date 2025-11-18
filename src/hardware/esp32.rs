@@ -1,4 +1,25 @@
 use crate::game_state::{Bitboard, PieceSensor};
+use std::fmt;
+
+/// Error types for ESP32 sensor operations
+#[derive(Debug, Clone, PartialEq)]
+pub enum SensorError {
+    /// GPIO initialization failed
+    GpioInit(String),
+    /// Shift register communication error
+    ShiftRegisterError,
+}
+
+impl fmt::Display for SensorError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SensorError::GpioInit(msg) => write!(f, "GPIO initialization failed: {}", msg),
+            SensorError::ShiftRegisterError => write!(f, "Shift register communication error"),
+        }
+    }
+}
+
+impl std::error::Error for SensorError {}
 
 /// DRV5032FB hall sensor array using 74HC165 shift registers
 ///
@@ -9,6 +30,7 @@ use crate::game_state::{Bitboard, PieceSensor};
 ///
 /// DRV5032FB outputs LOW when south pole magnet detected (piece present)
 /// 74HC165 shifts this data out serially when clocked
+#[derive(Debug)]
 pub struct Esp32PieceSensor {
     // TODO: Add GPIO pins for shift register control
     // - clock_pin: OutputPin for CLK
@@ -17,7 +39,7 @@ pub struct Esp32PieceSensor {
 }
 
 impl Esp32PieceSensor {
-    pub fn new() -> Result<Self, ()> {
+    pub fn new() -> Result<Self, SensorError> {
         // TODO: Initialize GPIO pins
         // - Configure CLK pin as output (idle low)
         // - Configure PL pin as output (idle high)
