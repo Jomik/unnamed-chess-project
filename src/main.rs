@@ -1,7 +1,7 @@
 mod game_state;
 mod hardware;
 
-#[cfg(all(feature = "visualization", not(target_arch = "xtensa")))]
+#[cfg(not(target_arch = "xtensa"))]
 mod visualization;
 
 #[cfg(target_arch = "xtensa")]
@@ -16,12 +16,6 @@ fn main() {
 
 #[cfg(not(target_arch = "xtensa"))]
 fn main() {
-    #[cfg(feature = "visualization")]
-    {
-        let sensor = hardware::MockPieceSensor::new();
-        visualization::run_interactive_terminal(sensor);
-    }
-
-    #[cfg(not(feature = "visualization"))]
-    println!("Run with: cargo run --features visualization");
+    let sensor = hardware::MockPieceSensor::new();
+    visualization::run_interactive_terminal(sensor);
 }

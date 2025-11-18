@@ -27,6 +27,10 @@ jobs:
             args: --all -- --check --color always
           - command: clippy
             args: --all-targets --all-features --workspace -- -D warnings
+          - command: build
+            args: --target x86_64-unknown-linux-gnu
+          - command: test
+            args: --target x86_64-unknown-linux-gnu
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

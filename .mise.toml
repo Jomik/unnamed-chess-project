@@ -22,8 +22,8 @@ run = "espup install"
 
 
 [tasks.dev]
-description = "Run development visualization"
-run = "cargo run --features visualization --target $HOST_TARGET"
+description = "Run development"
+run = "cargo run --target $HOST_TARGET"
 
 [tasks.test]
 description = "Run tests on host"
