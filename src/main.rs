@@ -1,3 +1,4 @@
+mod game_state;
 mod hardware;
 
 #[cfg(all(feature = "visualization", not(target_arch = "xtensa")))]
@@ -7,11 +8,7 @@ mod visualization;
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
-
-    log::info!("Chess Board - ESP32 Mode");
-
-    // TODO: Initialize real hardware once available
-
+    log::info!("Chess Board - ESP32");
     loop {
         esp_idf_svc::hal::delay::FreeRtos::delay_ms(1000);
     }
@@ -19,18 +16,12 @@ fn main() {
 
 #[cfg(not(target_arch = "xtensa"))]
 fn main() {
-    println!("Chess Board - Development Mode");
-
     #[cfg(feature = "visualization")]
     {
-        let mut board = hardware::MockChessBoard::new();
-        board.setup_initial_position();
-
-        visualization::run_interactive_terminal(board);
+        let sensor = hardware::MockPieceSensor::new();
+        visualization::run_interactive_terminal(sensor);
     }
 
     #[cfg(not(feature = "visualization"))]
-    {
-        println!("Run with: cargo run --features visualization");
-    }
+    println!("Run with: cargo run --features visualization");
 }
