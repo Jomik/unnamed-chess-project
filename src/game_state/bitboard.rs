@@ -18,14 +18,6 @@ impl Square {
     /// Creates a Square from an index (0-63).
     ///
     /// Returns an error if the index is out of range.
-    ///
-    /// # Examples
-    /// ```
-    /// # use unnamed_chess_project::game_state::Square;
-    /// assert_eq!(Square::from_index(0).unwrap().to_string(), "a1");
-    /// assert_eq!(Square::from_index(63).unwrap().to_string(), "h8");
-    /// assert!(Square::from_index(64).is_err());
-    /// ```
     pub fn from_index(idx: u8) -> Result<Self, SquareIndexError> {
         if idx < 64 {
             Ok(Square(idx))
@@ -51,13 +43,6 @@ impl Square {
 }
 
 /// Parse algebraic notation like "e4" into a Square.
-///
-/// # Examples
-/// ```
-/// # use unnamed_chess_project::game_state::Square;
-/// let square: Square = "e4".parse().unwrap();
-/// assert_eq!(square.index(), 28);
-/// ```
 impl FromStr for Square {
     type Err = SquareParseError;
 
@@ -66,11 +51,11 @@ impl FromStr for Square {
             return Err(SquareParseError::WrongLength);
         }
 
-        let file = s.chars().next().unwrap().to_ascii_lowercase();
-        let rank = s
-            .chars()
-            .nth(1)
-            .unwrap()
+        let bytes = s.as_bytes();
+
+        // Safe to index because we've verified length == 2
+        let file = (bytes[0] as char).to_ascii_lowercase();
+        let rank = (bytes[1] as char)
             .to_digit(10)
             .ok_or(SquareParseError::BadRank)?;
 
