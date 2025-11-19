@@ -10,20 +10,9 @@ use std::str::FromStr;
 pub struct Square(u8);
 
 /// Error returned when creating a Square from an invalid index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("square index {0} is out of range (valid range: 0-63)")]
 pub struct SquareIndexError(pub u8);
-
-impl fmt::Display for SquareIndexError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "square index {} is out of range (valid range: 0-63)",
-            self.0
-        )
-    }
-}
-
-impl std::error::Error for SquareIndexError {}
 
 impl Square {
     /// Creates a Square from an index (0-63).
@@ -105,27 +94,15 @@ impl fmt::Display for Square {
 }
 
 /// Error type for parsing square notation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SquareParseError {
-    /// Square notation must be exactly 2 characters
+    #[error("square must be 2 characters (e.g., 'e4')")]
     WrongLength,
-    /// File must be a letter from a-h
+    #[error("file must be a-h")]
     BadFile,
-    /// Rank must be a digit from 1-8
+    #[error("rank must be 1-8")]
     BadRank,
 }
-
-impl fmt::Display for SquareParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SquareParseError::WrongLength => write!(f, "square must be 2 characters (e.g., 'e4')"),
-            SquareParseError::BadFile => write!(f, "file must be a-h"),
-            SquareParseError::BadRank => write!(f, "rank must be 1-8"),
-        }
-    }
-}
-
-impl std::error::Error for SquareParseError {}
 
 /// A bitboard representing the state of the chess board.
 ///
