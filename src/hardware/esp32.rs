@@ -1,4 +1,5 @@
-use crate::game_state::{Bitboard, PieceSensor};
+use crate::game_logic::PieceSensor;
+use shakmaty::Bitboard;
 
 /// Error types for ESP32 sensor operations
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
