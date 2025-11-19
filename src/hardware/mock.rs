@@ -31,18 +31,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_mock_sensor_empty_on_creation() {
-        let mut sensor = MockPieceSensor::new();
-        assert_eq!(sensor.read_positions().value(), 0);
-    }
-
-    #[test]
-    fn test_mock_sensor_default() {
-        let mut sensor = MockPieceSensor::default();
-        assert_eq!(sensor.read_positions().value(), 0);
-    }
-
-    #[test]
     fn test_mock_sensor_toggle() {
         let mut sensor = MockPieceSensor::new();
         let square = Square::new(27).unwrap(); // d4

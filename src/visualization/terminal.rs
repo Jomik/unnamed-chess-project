@@ -36,12 +36,15 @@ pub fn run_interactive_terminal(mut sensor: MockPieceSensor) {
             "t" => {
                 if parts.len() < 2 {
                     println!("Usage: t <square>");
-                } else if let Some(square) = parse_square(parts[1]) {
-                    sensor.toggle(square);
-                    clear_screen();
-                    draw_interface(&mut sensor);
                 } else {
-                    println!("Invalid square");
+                    match parts[1].parse::<Square>() {
+                        Ok(square) => {
+                            sensor.toggle(square);
+                            clear_screen();
+                            draw_interface(&mut sensor);
+                        }
+                        Err(e) => println!("Invalid square: {}", e),
+                    }
                 }
             }
             "p" => {
@@ -52,24 +55,6 @@ pub fn run_interactive_terminal(mut sensor: MockPieceSensor) {
             _ => println!("Unknown command"),
         }
     }
-}
-
-/// Parses a square notation (e.g., "e4") into a Square.
-///
-/// Accepts algebraic notation: file (a-h) followed by rank (1-8).
-fn parse_square(s: &str) -> Option<Square> {
-    if s.len() != 2 {
-        return None;
-    }
-    let file = s.chars().next()?.to_ascii_lowercase();
-    let rank = s.chars().nth(1)?.to_digit(10)?;
-
-    if !('a'..='h').contains(&file) || !(1..=8).contains(&rank) {
-        return None;
-    }
-
-    let idx = ((rank as u8 - 1) * 8) + (file as u8 - b'a');
-    Square::new(idx)
 }
 
 /// Draws the complete interface: help text and board.
