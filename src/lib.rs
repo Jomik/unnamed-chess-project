@@ -1,5 +1,5 @@
 pub mod game_state;
 pub mod hardware;
 
-#[cfg(not(target_arch = "xtensa"))]
+#[cfg(not(target_os = "espidf"))]
 pub mod visualization;
