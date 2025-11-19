@@ -2,24 +2,16 @@ use crate::game_state::{Bitboard, PieceSensor};
 use std::fmt;
 
 /// Error types for ESP32 sensor operations
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum SensorError {
     /// GPIO initialization failed
+    #[error("GPIO initialization failed: {0}")]
     GpioInit(String),
+
     /// Shift register communication error
+    #[error("shift register communication error")]
     ShiftRegisterError,
 }
-
-impl fmt::Display for SensorError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            SensorError::GpioInit(msg) => write!(f, "GPIO initialization failed: {}", msg),
-            SensorError::ShiftRegisterError => write!(f, "Shift register communication error"),
-        }
-    }
-}
-
-impl std::error::Error for SensorError {}
 
 /// DRV5032FB hall sensor array using 74HC165 shift registers
 ///
