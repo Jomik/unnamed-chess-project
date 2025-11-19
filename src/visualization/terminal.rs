@@ -77,17 +77,17 @@ fn draw_board(sensor: &mut MockPieceSensor) {
     for rank in (0..8).rev() {
         print!("║ {} ║", rank + 1);
         for file in 0..8 {
-            if let Some(square) = Square::new(rank * 8 + file) {
-                let bit = 1u64 << square.value();
-                print!(
-                    "{}",
-                    if bb.value() & bit != 0 {
-                        " ♟ "
-                    } else {
-                        " · "
-                    }
-                );
-            }
+            let idx = rank * 8 + file;
+            let square = Square::from_index(idx).expect("index is always 0-63");
+            let bit = 1u64 << square.index();
+            print!(
+                "{}",
+                if bb.value() & bit != 0 {
+                    " ♟ "
+                } else {
+                    " · "
+                }
+            );
         }
         println!(" ║");
     }

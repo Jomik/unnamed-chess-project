@@ -9,18 +9,44 @@ use std::str::FromStr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Square(u8);
 
+/// Error returned when creating a Square from an invalid index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SquareIndexError(pub u8);
+
+impl fmt::Display for SquareIndexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "square index {} is out of range (valid range: 0-63)",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for SquareIndexError {}
+
 impl Square {
-    /// Creates a new Square if the index is valid (0-63).
-    pub fn new(idx: u8) -> Option<Self> {
+    /// Creates a Square from an index (0-63).
+    ///
+    /// Returns an error if the index is out of range.
+    ///
+    /// # Examples
+    /// ```
+    /// # use unnamed_chess_project::game_state::Square;
+    /// assert_eq!(Square::from_index(0).unwrap().to_string(), "a1");
+    /// assert_eq!(Square::from_index(63).unwrap().to_string(), "h8");
+    /// assert!(Square::from_index(64).is_err());
+    /// ```
+    pub fn from_index(idx: u8) -> Result<Self, SquareIndexError> {
         if idx < 64 {
-            Some(Square(idx))
+            Ok(Square(idx))
         } else {
-            None
+            Err(SquareIndexError(idx))
         }
     }
 
     /// Returns the internal index value (0-63).
-    pub fn value(&self) -> u8 {
+    pub fn index(&self) -> u8 {
         self.0
     }
 
@@ -41,7 +67,7 @@ impl Square {
 /// ```
 /// # use unnamed_chess_project::game_state::Square;
 /// let square: Square = "e4".parse().unwrap();
-/// assert_eq!(square.value(), 28);
+/// assert_eq!(square.index(), 28);
 /// ```
 impl FromStr for Square {
     type Err = SquareParseError;
@@ -121,7 +147,7 @@ impl Bitboard {
 
     /// Toggles the bit at the given square.
     pub fn toggle(&mut self, square: Square) {
-        self.0 ^= 1 << square.value();
+        self.0 ^= 1 << square.index();
     }
 }
 
@@ -130,42 +156,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_square_creation() {
-        assert!(Square::new(0).is_some());
-        assert!(Square::new(63).is_some());
-        assert!(Square::new(64).is_none());
-        assert!(Square::new(255).is_none());
+    fn test_square_from_index_valid() {
+        assert!(Square::from_index(0).is_ok());
+        assert!(Square::from_index(63).is_ok());
     }
 
     #[test]
-    fn test_square_value() {
-        assert_eq!(Square::new(0).unwrap().value(), 0);
-        assert_eq!(Square::new(42).unwrap().value(), 42);
-        assert_eq!(Square::new(63).unwrap().value(), 63);
+    fn test_square_from_index_invalid() {
+        assert!(Square::from_index(64).is_err());
+        assert!(Square::from_index(255).is_err());
+
+        let err = Square::from_index(100).unwrap_err();
+        assert_eq!(err.0, 100);
+    }
+
+    #[test]
+    fn test_square_index() {
+        assert_eq!(Square::from_index(0).unwrap().index(), 0);
+        assert_eq!(Square::from_index(42).unwrap().index(), 42);
+        assert_eq!(Square::from_index(63).unwrap().index(), 63);
     }
 
     #[test]
     fn test_square_file_rank() {
-        let a1 = Square::new(0).unwrap();
+        let a1 = Square::from_index(0).unwrap();
         assert_eq!(a1.file(), 'a');
         assert_eq!(a1.rank(), 1);
 
-        let h8 = Square::new(63).unwrap();
+        let h8 = Square::from_index(63).unwrap();
         assert_eq!(h8.file(), 'h');
         assert_eq!(h8.rank(), 8);
 
-        let e4 = Square::new(28).unwrap();
+        let e4 = Square::from_index(28).unwrap();
         assert_eq!(e4.file(), 'e');
         assert_eq!(e4.rank(), 4);
     }
 
     #[test]
     fn test_square_from_str() {
-        assert_eq!("a1".parse::<Square>().unwrap().value(), 0);
-        assert_eq!("h1".parse::<Square>().unwrap().value(), 7);
-        assert_eq!("a8".parse::<Square>().unwrap().value(), 56);
-        assert_eq!("h8".parse::<Square>().unwrap().value(), 63);
-        assert_eq!("e4".parse::<Square>().unwrap().value(), 28);
+        assert_eq!("a1".parse::<Square>().unwrap().index(), 0);
+        assert_eq!("h1".parse::<Square>().unwrap().index(), 7);
+        assert_eq!("a8".parse::<Square>().unwrap().index(), 56);
+        assert_eq!("h8".parse::<Square>().unwrap().index(), 63);
+        assert_eq!("e4".parse::<Square>().unwrap().index(), 28);
     }
 
     #[test]
@@ -186,16 +219,16 @@ mod tests {
 
     #[test]
     fn test_square_display() {
-        assert_eq!(Square::new(0).unwrap().to_string(), "a1");
-        assert_eq!(Square::new(7).unwrap().to_string(), "h1");
-        assert_eq!(Square::new(28).unwrap().to_string(), "e4");
-        assert_eq!(Square::new(63).unwrap().to_string(), "h8");
+        assert_eq!(Square::from_index(0).unwrap().to_string(), "a1");
+        assert_eq!(Square::from_index(7).unwrap().to_string(), "h1");
+        assert_eq!(Square::from_index(28).unwrap().to_string(), "e4");
+        assert_eq!(Square::from_index(63).unwrap().to_string(), "h8");
     }
 
     #[test]
     fn test_square_roundtrip() {
         for idx in 0..64 {
-            let square = Square::new(idx).unwrap();
+            let square = Square::from_index(idx).unwrap();
             let str_repr = square.to_string();
             let parsed: Square = str_repr.parse().unwrap();
             assert_eq!(square, parsed);
@@ -214,7 +247,7 @@ mod tests {
     #[test]
     fn test_bitboard_toggle() {
         let mut bb = Bitboard::new(0);
-        let square = Square::new(0).unwrap();
+        let square = Square::from_index(0).unwrap();
 
         bb.toggle(square);
         assert_eq!(bb.value(), 1);
@@ -227,9 +260,9 @@ mod tests {
     fn test_bitboard_multiple_squares() {
         let mut bb = Bitboard::new(0);
 
-        bb.toggle(Square::new(0).unwrap()); // a1
-        bb.toggle(Square::new(7).unwrap()); // h1
-        bb.toggle(Square::new(63).unwrap()); // h8
+        bb.toggle(Square::from_index(0).unwrap()); // a1
+        bb.toggle(Square::from_index(7).unwrap()); // h1
+        bb.toggle(Square::from_index(63).unwrap()); // h8
 
         assert_eq!(bb.value(), 0x8000000000000081);
         assert_eq!(bb.value().count_ones(), 3);

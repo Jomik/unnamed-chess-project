@@ -33,7 +33,7 @@ mod tests {
     #[test]
     fn test_mock_sensor_toggle() {
         let mut sensor = MockPieceSensor::new();
-        let square = Square::new(27).unwrap(); // d4
+        let square = Square::from_index(27).unwrap(); // d4
 
         sensor.toggle(square);
         assert_eq!(sensor.read_positions().value(), 1 << 27);
@@ -46,9 +46,9 @@ mod tests {
     fn test_mock_sensor_multiple_toggles() {
         let mut sensor = MockPieceSensor::new();
 
-        sensor.toggle(Square::new(0).unwrap()); // a1
-        sensor.toggle(Square::new(7).unwrap()); // h1
-        sensor.toggle(Square::new(63).unwrap()); // h8
+        sensor.toggle(Square::from_index(0).unwrap()); // a1
+        sensor.toggle(Square::from_index(7).unwrap()); // h1
+        sensor.toggle(Square::from_index(63).unwrap()); // h8
 
         let bb = sensor.read_positions();
         assert_eq!(bb.value(), 0x8000000000000081);
