@@ -1,5 +1,4 @@
 use crate::game_state::{Bitboard, PieceSensor};
-use std::fmt;
 
 /// Error types for ESP32 sensor operations
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

@@ -46,4 +46,4 @@ esp-idf-svc = "0.51.0"
 # critical-section = { version = "1.1", features = ["std"], default-features = false }
 
 [build-dependencies]
-embuild = "0.33.1"
+embuild = { version = "0.33.1", features = ["espidf"] }
