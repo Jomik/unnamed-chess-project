@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Jonas Damtoft <Jomik@users.noreply.github.com>"]
 edition = "2021"
 resolver = "2"
-rust-version = "1.77"
+rust-version = "1.85.1"
 
 [[bin]]
 name = "unnamed-chess-project"
@@ -23,6 +23,7 @@ experimental = ["esp-idf-svc/experimental"]
 
 [dependencies]
 log = "0.4.28"
+shakmaty = "0.29.4"
 thiserror = "2.0.17"
 
 [target.'cfg(target_os = "espidf")'.dependencies]

@@ -1,6 +1,8 @@
-use crate::game_state::{PieceSensor, Square};
-use crate::hardware::MockPieceSensor;
 use std::io::{self, Write};
+
+use crate::game_logic::PieceSensor;
+use crate::hardware::MockPieceSensor;
+use shakmaty::{File, Rank, Square};
 
 /// Clears the screen and moves cursor to top-left.
 fn clear_screen() {
@@ -74,20 +76,11 @@ fn draw_board(sensor: &mut MockPieceSensor) {
     println!("║      Piece Positions        ║");
     println!("╠═══╦═════════════════════════╣");
 
-    for rank in (0..8).rev() {
-        print!("║ {} ║", rank + 1);
-        for file in 0..8 {
-            let idx = rank * 8 + file;
-            let square = Square::from_index(idx).expect("index is always 0-63");
-            let bit = 1u64 << square.index();
-            print!(
-                "{}",
-                if bb.value() & bit != 0 {
-                    " ♟ "
-                } else {
-                    " · "
-                }
-            );
+    for rank in Rank::ALL.iter().rev() {
+        print!("║ {} ║", rank.char());
+        for file in File::ALL {
+            let square = Square::from_coords(file, *rank);
+            print!("{}", if bb.contains(square) { " ♟ " } else { " · " });
         }
         println!(" ║");
     }
@@ -95,13 +88,5 @@ fn draw_board(sensor: &mut MockPieceSensor) {
     println!("╠═══╬═════════════════════════╣");
     println!("║   ║ a  b  c  d  e  f  g  h  ║");
     println!("╚═══╩═════════════════════════╝");
-    println!(
-        "Bitboard: 0x{:016X} | Pieces: {}",
-        bb.value(),
-        bb.value().count_ones()
-    );
-
-    if let Err(e) = io::stdout().flush() {
-        eprintln!("Failed to flush stdout: {}", e);
-    }
+    println!("Bitboard: {:#018X} | Pieces: {:02}", bb, bb.count())
 }
