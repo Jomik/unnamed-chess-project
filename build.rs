@@ -1,7 +1,6 @@
 fn main() {
     // Only run embuild when targeting ESP-IDF
-    #[cfg(target_os = "espidf")]
-    {
+    if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "espidf" {
         embuild::espidf::sysenv::output();
     }
 }
