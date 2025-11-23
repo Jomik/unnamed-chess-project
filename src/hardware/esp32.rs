@@ -1,4 +1,3 @@
-use crate::game_logic::PieceSensor;
 use shakmaty::Bitboard;
 
 /// Error types for ESP32 sensor operations
@@ -31,17 +30,15 @@ pub struct Esp32PieceSensor {
 }
 
 impl Esp32PieceSensor {
-    pub fn new() -> Result<Self, SensorError> {
+    pub fn from() -> Result<Self, SensorError> {
         // TODO: Initialize GPIO pins
         // - Configure CLK pin as output (idle low)
         // - Configure PL pin as output (idle high)
         // - Configure Q7 pin as input
         todo!("Initialize 74HC165 shift register interface")
     }
-}
 
-impl PieceSensor for Esp32PieceSensor {
-    fn read_positions(&mut self) -> Bitboard {
+    pub fn read_positions(&mut self) -> Bitboard {
         // TODO: Read all 64 bits from shift registers
         // Sequence:
         // 1. Pulse PL LOW (25ns min) to load parallel inputs

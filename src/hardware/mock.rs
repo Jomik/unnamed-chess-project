@@ -1,6 +1,4 @@
-use shakmaty::{Bitboard, Square};
-
-use crate::game_logic::PieceSensor;
+use shakmaty::{Bitboard, Chess, Position, Square};
 
 /// Mock sensor for testing and development on non-ESP32 targets.
 ///
@@ -13,17 +11,18 @@ pub struct MockPieceSensor {
 impl MockPieceSensor {
     /// Creates a new mock sensor with an empty board.
     pub fn new() -> Self {
-        Self::default()
+        let mut bitboard = Chess::default().board().occupied();
+        // Remove E1 (white king square)
+        bitboard.toggle(Square::E1);
+        Self { bitboard }
+    }
+
+    pub fn read_positions(&mut self) -> Bitboard {
+        self.bitboard
     }
 
     /// Toggles the piece presence at the given square.
     pub fn toggle(&mut self, square: Square) {
         self.bitboard.toggle(square);
-    }
-}
-
-impl PieceSensor for MockPieceSensor {
-    fn read_positions(&mut self) -> Bitboard {
-        self.bitboard
     }
 }
