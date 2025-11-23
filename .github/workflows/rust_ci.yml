@@ -22,7 +22,7 @@ jobs:
       matrix:
         action:
           - command: +esp build
-            args: --release
+            args: --release --target xtensa-esp32-espidf
           - command: fmt
             args: --all -- --check --color always
           - command: +esp clippy
