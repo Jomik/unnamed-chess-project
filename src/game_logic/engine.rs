@@ -90,11 +90,17 @@ impl GameEngine {
     ///
     /// The engine tracks changes and returns events describing what happened.
     pub fn tick(&mut self, current_bb: Bitboard) -> Vec<GameEvent> {
-        match self.phase {
+        if current_bb == self.last_bitboard {
+            return vec![]; // Physical board hasn't changed
+        }
+
+        let events = match self.phase {
             GamePhase::Setup { .. } => self.process_setup(current_bb),
             GamePhase::Playing => self.process_playing(current_bb),
             GamePhase::GameOver => self.process_game_over(current_bb),
-        }
+        };
+        self.last_bitboard = current_bb;
+        events
     }
 
     fn process_setup(&mut self, current_bb: Bitboard) -> Vec<GameEvent> {
@@ -112,16 +118,11 @@ impl GameEngine {
     }
 
     fn process_playing(&mut self, current_bb: Bitboard) -> Vec<GameEvent> {
-        if current_bb == self.last_bitboard {
-            return Vec::new(); // Physical board hasn't changed
-        }
-
         let removed = self.last_bitboard & !current_bb;
         let added = current_bb & !self.last_bitboard;
 
-        self.last_bitboard = current_bb;
-
         match (removed.count(), added.count()) {
+            (0, 0) => vec![],
             (1, 0) => {
                 let from = removed.first().unwrap();
                 self.lifted_from = Some(from);
