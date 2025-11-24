@@ -10,7 +10,5 @@ fn main() {
 
 #[cfg(not(target_os = "espidf"))]
 fn main() {
-    use unnamed_chess_project::hardware;
-    let sensor = hardware::MockPieceSensor::new();
-    unnamed_chess_project::visualization::run_interactive_terminal(sensor);
+    unnamed_chess_project::visualization::run_interactive_terminal();
 }
