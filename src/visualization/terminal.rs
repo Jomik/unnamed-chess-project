@@ -1,8 +1,10 @@
 use std::io::{self, Write};
 
+use super::MockPieceSensor;
 use crate::game_logic::GameEngine;
-use crate::hardware::MockPieceSensor;
-use shakmaty::{Bitboard, Color, File, Rank, Role, Square};
+use shakmaty::{
+    Bitboard, CastlingMode, Chess, Color, File, Position, Rank, Role, Square, fen::Fen,
+};
 
 /// Clears the screen and moves cursor to top-left.
 fn clear_screen() {
@@ -54,6 +56,33 @@ pub fn run_interactive_terminal() {
                     }
                 }
             }
+            "load" => {
+                if parts.len() < 2 {
+                    println!("Usage: load <fen> | load startpos");
+                } else {
+                    let fen_str = if parts[1] == "startpos" {
+                        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+                    } else {
+                        // Rejoin the rest of the parts as FEN might contain spaces
+                        input[5..].trim()
+                    };
+
+                    match fen_str.parse::<Fen>() {
+                        Ok(fen) => {
+                            if let Ok(chess) = fen.into_position::<Chess>(CastlingMode::Standard) {
+                                sensor.load_bitboard(chess.board().occupied());
+                                engine = GameEngine::from_position(chess);
+                                clear_screen();
+                                draw_interface(&mut sensor, &engine);
+                                println!("\n✅ Position loaded from FEN");
+                            } else {
+                                println!("❌ Invalid FEN setup");
+                            }
+                        }
+                        Err(e) => println!("❌ Invalid FEN: {}", e),
+                    }
+                }
+            }
             "r" => {
                 sensor = MockPieceSensor::new();
                 engine = GameEngine::new();
@@ -77,7 +106,7 @@ fn draw_interface(sensor: &mut MockPieceSensor, engine: &GameEngine) {
     println!();
 
     println!();
-    println!("Commands: t <square> | r (reset) | p (refresh) | q (quit)");
+    println!("Commands: t <square> | load <fen> | r (reset) | p (refresh) | q (quit)");
     println!();
 
     draw_dual_boards(sensor, engine);
@@ -126,14 +155,6 @@ fn draw_dual_boards(sensor: &mut MockPieceSensor, engine: &GameEngine) {
 
 /// Get the display symbol for a square on the game state board.
 fn get_game_state_symbol(square: Square, sensor_bb: Bitboard, engine: &GameEngine) -> &'static str {
-    // // Check for missing/extra pieces (in Setup phase)
-    // if missing.contains(square) {
-    //     return " ○ ";
-    // }
-    // if extra.contains(square) {
-    //     return " ⚠ ";
-    // }
-
     let has_sensor = sensor_bb.contains(square);
 
     // In playing, show piece types or detect discrepancies

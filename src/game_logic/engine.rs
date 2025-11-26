@@ -11,9 +11,15 @@ pub struct GameEngine {
 
 impl GameEngine {
     pub fn new() -> Self {
+        Self::from_position(Chess::default())
+    }
+
+    /// Creates a GameEngine from an existing chess position.
+    pub fn from_position(position: Chess) -> Self {
+        let bb = position.board().occupied();
         Self {
-            position: Chess::default(),
-            last_bitboard: Chess::default().board().occupied(),
+            position,
+            last_bitboard: bb,
         }
     }
 
@@ -204,11 +210,7 @@ mod test_helpers {
                 .expect("invalid FEN")
                 .into_position(CastlingMode::Standard)
                 .expect("invalid position");
-            let last_bitboard = position.board().occupied();
-            Self {
-                position,
-                last_bitboard,
-            }
+            Self::from_position(position)
         }
     }
 }
