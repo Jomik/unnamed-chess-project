@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use crate::game_logic::GameEngine;
 use crate::hardware::MockPieceSensor;
-use shakmaty::{Bitboard, File, Rank, Role, Square};
+use shakmaty::{Bitboard, Color, File, Rank, Role, Square};
 
 /// Clears the screen and moves cursor to top-left.
 fn clear_screen() {
@@ -141,13 +141,19 @@ fn get_game_state_symbol(square: Square, sensor_bb: Bitboard, engine: &GameEngin
         // Should have a piece here
         if has_sensor {
             // Correct - show piece type
-            match piece.role {
-                Role::Pawn => " P ",
-                Role::Knight => " N ",
-                Role::Bishop => " B ",
-                Role::Rook => " R ",
-                Role::Queen => " Q ",
-                Role::King => " K ",
+            match (piece.role, piece.color) {
+                (Role::Pawn, Color::White) => " P ",
+                (Role::Knight, Color::White) => " N ",
+                (Role::Bishop, Color::White) => " B ",
+                (Role::Rook, Color::White) => " R ",
+                (Role::Queen, Color::White) => " Q ",
+                (Role::King, Color::White) => " K ",
+                (Role::Pawn, Color::Black) => " p ",
+                (Role::Knight, Color::Black) => " n ",
+                (Role::Bishop, Color::Black) => " b ",
+                (Role::Rook, Color::Black) => " r ",
+                (Role::Queen, Color::Black) => " q ",
+                (Role::King, Color::Black) => " k ",
             }
         } else {
             // Missing piece
