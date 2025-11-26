@@ -1,6 +1,6 @@
 use shakmaty::{Bitboard, Chess, Position, Square};
 
-/// Mock sensor for testing and development on non-ESP32 targets.
+/// Mock sensor for terminal visualization and testing.
 ///
 /// Maintains an in-memory bitboard that can be toggled via the terminal interface.
 #[derive(Debug, Clone, Default)]
@@ -9,7 +9,7 @@ pub struct MockPieceSensor {
 }
 
 impl MockPieceSensor {
-    /// Creates a new mock sensor with an empty board.
+    /// Creates a new mock sensor with the starting chess position, minus the white king.
     pub fn new() -> Self {
         let mut bitboard = Chess::default().board().occupied();
         // Remove E1 (white king square)
@@ -24,5 +24,10 @@ impl MockPieceSensor {
     /// Toggles the piece presence at the given square.
     pub fn toggle(&mut self, square: Square) {
         self.bitboard.toggle(square);
+    }
+
+    /// Loads a complete bitboard position (for FEN loading).
+    pub fn load_bitboard(&mut self, bitboard: Bitboard) {
+        self.bitboard = bitboard;
     }
 }
