@@ -1,3 +1,4 @@
+pub mod feedback;
 pub mod game_logic;
 
 #[cfg(target_os = "espidf")]
