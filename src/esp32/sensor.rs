@@ -38,7 +38,7 @@ impl Esp32PieceSensor {
         todo!("Initialize 74HC165 shift register interface")
     }
 
-    pub fn read_positions(&mut self) -> Bitboard {
+    pub fn read_positions(&mut self) -> Result<Bitboard, SensorError> {
         // TODO: Read all 64 bits from shift registers
         // Sequence:
         // 1. Pulse PL LOW (25ns min) to load parallel inputs
