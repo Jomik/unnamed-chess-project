@@ -27,5 +27,5 @@ fn main() {
 
 #[cfg(not(target_os = "espidf"))]
 fn main() {
-    unnamed_chess_project::visualization::run_interactive_terminal();
+    unnamed_chess_project::mock::run_interactive_terminal();
 }
