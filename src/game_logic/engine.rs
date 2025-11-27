@@ -1,4 +1,4 @@
-use shakmaty::{Bitboard, Chess, EnPassantMode, Move, Piece, Position, Square, fen::Fen};
+use shakmaty::{Bitboard, Chess, EnPassantMode, Move, Piece, Position, Role, Square, fen::Fen};
 
 /// Core game engine that processes sensor input and maintains game state
 pub struct GameEngine {
@@ -51,6 +51,11 @@ impl GameEngine {
 
         // Find a legal move that results in this physical bitboard state
         for mv in self.position.legal_moves() {
+            // We only allow promotions to Queen to simplify physical interaction (no piece selection mechanism on hardware).
+            if mv.promotion().is_some_and(|role| role != Role::Queen) {
+                continue;
+            }
+
             let expected_bb = self.compute_bitboard_after_move(mv);
 
             if expected_bb == current_bb {
@@ -421,5 +426,25 @@ mod tests {
         assert_piece(&engine, "d1", Role::Rook, Color::White);
         assert_empty(&engine, "e1");
         assert_empty(&engine, "a1");
+    }
+
+    #[test]
+    fn test_promotion() {
+        let mut engine =
+            GameEngine::from_fen("r1bqkbnr/pPpppppp/2n5/8/8/8/PP1PPPPP/RNBQKBNR w KQkq - 0 1");
+
+        BoardScript::parse("b7b8.").execute(&mut engine);
+        assert_piece(&engine, "b8", Role::Queen, Color::White);
+        assert_empty(&engine, "b7");
+    }
+
+    #[test]
+    fn test_promotion_capture() {
+        let mut engine =
+            GameEngine::from_fen("r1bqkbnr/pPpppppp/2n5/8/8/8/PP1PPPPP/RNBQKBNR w KQkq - 0 1");
+
+        BoardScript::parse("a8b7. a8.").execute(&mut engine);
+        assert_piece(&engine, "a8", Role::Queen, Color::White);
+        assert_empty(&engine, "b7");
     }
 }
