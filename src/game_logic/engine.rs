@@ -219,24 +219,16 @@ mod test_helpers {
 mod tests {
     use super::*;
     use shakmaty::{Color, Role};
+    use test_case::test_case;
     use test_dsl::BoardScript;
     use test_helpers::*;
 
-    #[test]
-    fn test_simple_move_one_tick() {
+    #[test_case("e2e3."; "one tick")]
+    #[test_case("e2. e3."; "two tick")]
+    fn test_simple_move(moves: &str) {
         let mut engine = GameEngine::new();
 
-        BoardScript::parse("e2e3.").execute(&mut engine);
-
-        assert_empty(&engine, "e2");
-        assert_piece(&engine, "e3", Role::Pawn, Color::White);
-    }
-
-    #[test]
-    fn test_simple_move_two_ticks() {
-        let mut engine = GameEngine::new();
-
-        BoardScript::parse("e2. e3.").execute(&mut engine);
+        BoardScript::parse(moves).execute(&mut engine);
 
         assert_empty(&engine, "e2");
         assert_piece(&engine, "e3", Role::Pawn, Color::White);
@@ -325,32 +317,14 @@ mod tests {
         assert_empty(&engine, "d1");
     }
 
-    #[test]
-    fn test_capture_slow() {
+    #[test_case("d5. e4. d5."; "slow")]
+    #[test_case("d5 e4. d5."; "quick take")]
+    #[test_case("d5. e4 d5."; "quick move")]
+    fn test_capture(moves: &str) {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
 
-        BoardScript::parse("d5. e4. d5.").execute(&mut engine);
-
-        assert_piece(&engine, "d5", Role::Pawn, Color::White);
-    }
-
-    #[test]
-    fn test_capture_quick_take() {
-        let mut engine =
-            GameEngine::from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
-
-        BoardScript::parse("d5 e4. d5.").execute(&mut engine);
-
-        assert_piece(&engine, "d5", Role::Pawn, Color::White);
-    }
-
-    #[test]
-    fn test_capture_quick_move() {
-        let mut engine =
-            GameEngine::from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
-
-        BoardScript::parse("d5. e4 d5.").execute(&mut engine);
+        BoardScript::parse(moves).execute(&mut engine);
 
         assert_piece(&engine, "d5", Role::Pawn, Color::White);
     }

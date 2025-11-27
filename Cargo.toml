@@ -46,5 +46,8 @@ esp-idf-svc = "0.51.0"
 # esp-idf-svc = { version = "0.51", features = ["embassy-time-driver", "embassy-sync"] }
 # critical-section = { version = "1.1", features = ["std"], default-features = false }
 
+[dev-dependencies]
+test-case = "3.3.1"
+
 [build-dependencies]
 embuild = { version = "0.33.1", features = ["espidf"] }
