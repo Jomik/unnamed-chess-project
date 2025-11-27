@@ -7,6 +7,7 @@ use shakmaty::{
 };
 
 /// Clears the screen and moves cursor to top-left.
+#[inline]
 fn clear_screen() {
     print!("\x1B[2J\x1B[H");
 }
