@@ -1,6 +1,7 @@
 use shakmaty::{Bitboard, Chess, EnPassantMode, Move, Piece, Position, Role, Square, fen::Fen};
 
 /// Core game engine that processes sensor input and maintains game state
+#[derive(Default)]
 pub struct GameEngine {
     /// The logical chess position (piece types, turn, castling rights, etc.)
     position: Chess,
@@ -11,6 +12,7 @@ pub struct GameEngine {
 }
 
 impl GameEngine {
+    #[inline]
     pub fn new() -> Self {
         Self::from_position(Chess::default())
     }
@@ -25,6 +27,7 @@ impl GameEngine {
     }
 
     /// Get the piece at a given square, if any
+    #[inline]
     pub fn piece_at(&self, square: Square) -> Option<Piece> {
         self.position.board().piece_at(square)
     }
@@ -105,12 +108,6 @@ impl GameEngine {
         }
 
         bb
-    }
-}
-
-impl Default for GameEngine {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
