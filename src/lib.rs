@@ -4,4 +4,4 @@ pub mod game_logic;
 pub mod esp32;
 
 #[cfg(not(target_os = "espidf"))]
-pub mod visualization;
+pub mod mock;
