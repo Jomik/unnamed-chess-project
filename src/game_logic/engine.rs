@@ -1,11 +1,12 @@
-use shakmaty::{Bitboard, Chess, EnPassantMode, Piece, Position, Square, fen::Fen};
+use shakmaty::{Bitboard, Chess, EnPassantMode, Move, Piece, Position, Square, fen::Fen};
 
 /// Core game engine that processes sensor input and maintains game state
 pub struct GameEngine {
     /// The logical chess position (piece types, turn, castling rights, etc.)
     position: Chess,
 
-    /// Last known physical board state from sensors
+    /// Last known physical board state from sensors.
+    /// Tracks actual piece positions independent of game logic.
     last_bitboard: Bitboard,
 }
 
@@ -36,33 +37,69 @@ impl GameEngine {
             return; // Physical board hasn't changed
         }
 
-        let expected = self.position.board().occupied();
+        // What changed since last tick?
+        let placed = current_bb & !self.last_bitboard; // Pieces added
 
-        // Difference from current position
-        let missing = expected & !current_bb;
+        // Update last_bitboard
+        self.last_bitboard = current_bb;
 
-        // Change this tick
-        let added = current_bb & !self.last_bitboard;
+        // Wait until pieces are placed before processing moves.
+        // This allows lifting pieces without triggering move execution.
+        if placed.is_empty() {
+            return;
+        }
 
-        let touched_pieces = self.position.us() & missing;
-        if touched_pieces.count() == 1 {
-            // We are moving, handle castling later.
-            if let Some(from) = touched_pieces.first()
-                && let Some(to) = added.first()
-            {
-                let legal = self
-                    .position
-                    .legal_moves()
-                    .into_iter()
-                    .find(|m| m.from() == Some(from) && m.to() == to);
-                if let Some(mv) = legal {
-                    // Play the move and update the position
-                    self.position.play_unchecked(mv);
+        // Find a legal move that results in this physical bitboard state
+        for mv in self.position.legal_moves() {
+            let expected_bb = self.compute_bitboard_after_move(mv);
+
+            if expected_bb == current_bb {
+                self.position.play_unchecked(mv);
+                break;
+            }
+        }
+    }
+
+    /// Computes the expected bitboard after applying a move.
+    ///
+    /// Used during move detection to match physical board states from sensors against legal chess moves.
+    fn compute_bitboard_after_move(&self, mv: Move) -> Bitboard {
+        let mut bb = self.position.board().occupied();
+
+        match mv {
+            Move::Normal {
+                from, to, capture, ..
+            } => {
+                bb.toggle(from);
+
+                // For captures: square stays occupied (different piece)
+                // For non-captures: square becomes occupied
+                if capture.is_none() {
+                    bb.toggle(to);
                 }
+            }
+            Move::EnPassant { from, to } => {
+                bb.toggle(from);
+                let captured_sq = Square::from_coords(to.file(), from.rank());
+                bb.toggle(captured_sq); // Remove captured pawn (different square than 'to')
+                bb.toggle(to); // Place capturing pawn
+            }
+            Move::Castle { king, rook } => {
+                let side = mv
+                    .castling_side()
+                    .expect("Castle move must have a castling side");
+                let color = self.position.turn();
+                bb.toggle(king);
+                bb.toggle(rook);
+                bb.toggle(side.king_to(color));
+                bb.toggle(side.rook_to(color));
+            }
+            Move::Put { .. } => {
+                unreachable!("Put moves are not supported in standard chess")
             }
         }
 
-        self.last_bitboard = current_bb;
+        bb
     }
 }
 
@@ -330,6 +367,17 @@ mod tests {
     }
 
     #[test]
+    fn test_pawn_lift() {
+        let mut engine =
+            GameEngine::from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
+
+        BoardScript::parse("e4.").execute(&mut engine);
+
+        assert_piece(&engine, "d5", Role::Pawn, Color::Black);
+        assert_piece(&engine, "e4", Role::Pawn, Color::White);
+    }
+
+    #[test]
     fn test_en_passant() {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
@@ -337,5 +385,40 @@ mod tests {
         BoardScript::parse("e5. d5 d6.").execute(&mut engine);
         assert_piece(&engine, "d6", Role::Pawn, Color::White);
         assert_empty(&engine, "d5");
+    }
+
+    #[test_case("e1. g1. h1. f1."; "king first, slow")]
+    #[test_case("e1g1. h1f1."; "king first, quick")]
+    #[test_case("e1. h1. f1. g1."; "rook first, slow")]
+    #[test_case("e1. h1f1. g1."; "rook first, quick")]
+    #[test_case("e1h1. f1g1."; "two handed")]
+    #[test_case("e1. h1g1. g1f1. g1."; "rook slide")]
+    fn test_castle_king_side(moves: &str) {
+        let mut engine = GameEngine::from_fen(
+            "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1",
+        );
+
+        BoardScript::parse(moves).execute(&mut engine);
+        assert_piece(&engine, "g1", Role::King, Color::White);
+        assert_piece(&engine, "f1", Role::Rook, Color::White);
+        assert_empty(&engine, "e1");
+        assert_empty(&engine, "h1");
+    }
+
+    #[test_case("e1. c1. a1. d1."; "king first, slow")]
+    #[test_case("e1c1. a1d1."; "king first, quick")]
+    #[test_case("e1. a1. d1. c1."; "rook first, slow")]
+    #[test_case("e1. a1d1. c1."; "quick")]
+    #[test_case("e1. a1b1. b1c1. c1d1. c1."; "rook slide")]
+    fn test_castle_queen_side(moves: &str) {
+        let mut engine = GameEngine::from_fen(
+            "r1bqkbnr/ppp3pp/2n1pp2/3p4/3P1B2/2NQ4/PPP1PPPP/R3KBNR w KQkq - 0 1",
+        );
+
+        BoardScript::parse(moves).execute(&mut engine);
+        assert_piece(&engine, "c1", Role::King, Color::White);
+        assert_piece(&engine, "d1", Role::Rook, Color::White);
+        assert_empty(&engine, "e1");
+        assert_empty(&engine, "a1");
     }
 }
