@@ -409,6 +409,7 @@ mod tests {
     #[test_case("e1c1. a1d1."; "king first, quick")]
     #[test_case("e1. a1. d1. c1."; "rook first, slow")]
     #[test_case("e1. a1d1. c1."; "quick")]
+    #[test_case("e1a1. c1d1."; "two handed")]
     #[test_case("e1. a1b1. b1c1. c1d1. c1."; "rook slide")]
     fn test_castle_queen_side(moves: &str) {
         let mut engine = GameEngine::from_fen(
