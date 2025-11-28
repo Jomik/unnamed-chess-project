@@ -1,4 +1,33 @@
-use shakmaty::{Bitboard, Chess, EnPassantMode, Piece, Position, Role, Square, fen::Fen};
+use crate::feedback::FeedbackSource;
+use shakmaty::{
+    Bitboard, Chess, EnPassantMode, Move, MoveList, Piece, Position, Role, Square, fen::Fen,
+};
+
+/// Current game state snapshot for feedback and display
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameState {
+    legal_moves: MoveList,
+    lifted_piece: Option<Square>,
+}
+
+impl GameState {
+    fn new(legal_moves: MoveList, lifted_piece: Option<Square>) -> Self {
+        Self {
+            legal_moves,
+            lifted_piece,
+        }
+    }
+}
+
+impl FeedbackSource for GameState {
+    fn legal_moves(&self) -> &[Move] {
+        &self.legal_moves
+    }
+
+    fn lifted_piece(&self) -> Option<Square> {
+        self.lifted_piece
+    }
+}
 
 /// Core game engine that processes sensor input and maintains game state
 #[derive(Default)]
@@ -34,8 +63,17 @@ impl GameEngine {
 
     /// Process a board state reading
     ///
-    /// The engine tracks changes
-    pub fn tick(&mut self, current_bb: Bitboard) {
+    /// Tracks changes in piece positions and executes legal moves when pieces are placed.
+    pub fn tick(&mut self, current_bb: Bitboard) -> GameState {
+        self.process_moves(current_bb);
+        let expected = self.position.board().occupied();
+        let lifted = expected & !current_bb;
+
+        GameState::new(self.position.legal_moves(), lifted.single_square())
+    }
+
+    /// Process any completed moves based on sensor state
+    fn process_moves(&mut self, current_bb: Bitboard) {
         if current_bb == self.last_bitboard {
             return; // Physical board hasn't changed
         }
@@ -402,5 +440,39 @@ mod tests {
         BoardScript::parse("a8b7. a8.").execute(&mut engine);
         assert_piece(&engine, "a8", Role::Queen, Color::White);
         assert_empty(&engine, "b7");
+    }
+
+    #[test]
+    fn test_tick_returns_valid_state() {
+        let mut engine = GameEngine::new();
+        let bb = engine.last_bitboard;
+
+        let state = engine.tick(bb);
+
+        assert_eq!(state.legal_moves().len(), 20);
+        assert_eq!(state.lifted_piece(), None);
+    }
+
+    #[test]
+    fn test_tick_detects_single_lifted_piece() {
+        let mut engine = GameEngine::new();
+        let mut bb = engine.last_bitboard;
+        bb.toggle(Square::E2);
+
+        let state = engine.tick(bb);
+
+        assert_eq!(state.lifted_piece(), Some(Square::E2));
+    }
+
+    #[test]
+    fn test_tick_no_lifted_piece_when_multiple_missing() {
+        let mut engine = GameEngine::new();
+        let mut bb = engine.last_bitboard;
+        bb.toggle(Square::E2);
+        bb.toggle(Square::D2);
+
+        let state = engine.tick(bb);
+
+        assert_eq!(state.lifted_piece(), None);
     }
 }

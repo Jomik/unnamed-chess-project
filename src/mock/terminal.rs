@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use super::MockPieceSensor;
+use crate::feedback::{self, FeedbackSource, SquareFeedback};
 use crate::game_logic::GameEngine;
 use shakmaty::{
     Bitboard, CastlingMode, Chess, Color, File, Position, Rank, Role, Square, fen::Fen,
@@ -20,7 +21,7 @@ pub fn run_interactive_terminal() {
     let mut engine = GameEngine::new();
 
     clear_screen();
-    draw_interface(&mut sensor, &engine);
+    draw_interface(&mut sensor, &mut engine);
 
     loop {
         print!("> ");
@@ -48,10 +49,8 @@ pub fn run_interactive_terminal() {
                     match parts[1].parse::<Square>() {
                         Ok(square) => {
                             sensor.toggle(square);
-                            let bb = sensor.read_positions();
-                            engine.tick(bb);
                             clear_screen();
-                            draw_interface(&mut sensor, &engine);
+                            draw_interface(&mut sensor, &mut engine);
                         }
                         Err(e) => println!("Invalid square: {}", e),
                     }
@@ -74,7 +73,7 @@ pub fn run_interactive_terminal() {
                                 sensor.load_bitboard(chess.board().occupied());
                                 engine = GameEngine::from_position(chess);
                                 clear_screen();
-                                draw_interface(&mut sensor, &engine);
+                                draw_interface(&mut sensor, &mut engine);
                                 println!("\n✅ Position loaded from FEN");
                             } else {
                                 println!("❌ Invalid FEN setup");
@@ -88,12 +87,12 @@ pub fn run_interactive_terminal() {
                 sensor = MockPieceSensor::new();
                 engine = GameEngine::new();
                 clear_screen();
-                draw_interface(&mut sensor, &engine);
+                draw_interface(&mut sensor, &mut engine);
                 println!("\n🔄 Reset to initial state");
             }
             "p" => {
                 clear_screen();
-                draw_interface(&mut sensor, &engine);
+                draw_interface(&mut sensor, &mut engine);
             }
             "q" => break,
             _ => println!("Unknown command"),
@@ -102,7 +101,7 @@ pub fn run_interactive_terminal() {
 }
 
 /// Draws the complete interface: help text, phase, events, and dual boards.
-fn draw_interface(sensor: &mut MockPieceSensor, engine: &GameEngine) {
+fn draw_interface(sensor: &mut MockPieceSensor, engine: &mut GameEngine) {
     println!("♟️  Chess Board Sensor Simulator");
     println!();
 
@@ -114,8 +113,10 @@ fn draw_interface(sensor: &mut MockPieceSensor, engine: &GameEngine) {
 }
 
 /// Draws both boards side-by-side: raw sensors (left) and game state (right).
-fn draw_dual_boards(sensor: &mut MockPieceSensor, engine: &GameEngine) {
+fn draw_dual_boards(sensor: &mut MockPieceSensor, engine: &mut GameEngine) {
     let sensor_bb = sensor.read_positions();
+    let state = engine.tick(sensor_bb);
+    let feedback = feedback::compute_feedback(&state);
 
     println!("╔═════════════════════════════╦═════════════════════════════╗");
     println!("║       Raw Sensors           ║       Game State            ║");
@@ -132,11 +133,11 @@ fn draw_dual_boards(sensor: &mut MockPieceSensor, engine: &GameEngine) {
 
         print!(" ║");
 
-        // Right board: Game state with piece types and status
+        // Right board: Game state with piece types and feedback highlights
         print!(" {} ║", rank.char());
         for file in File::ALL {
             let square = Square::from_coords(file, *rank);
-            let symbol = get_game_state_symbol(square, sensor_bb, engine);
+            let symbol = get_game_state_symbol(square, sensor_bb, engine, &feedback);
             print!("{}", symbol);
         }
 
@@ -152,43 +153,59 @@ fn draw_dual_boards(sensor: &mut MockPieceSensor, engine: &GameEngine) {
         sensor_bb,
         sensor_bb.count()
     );
+
+    // Show lifted piece info
+    if let Some(lifted_square) = state.lifted_piece() {
+        println!("\n🔵 Lifted: {}", lifted_square);
+        println!("   Legal destinations: {}", feedback.squares().len());
+    }
 }
 
 /// Get the display symbol for a square on the game state board.
-fn get_game_state_symbol(square: Square, sensor_bb: Bitboard, engine: &GameEngine) -> &'static str {
+fn get_game_state_symbol(
+    square: Square,
+    sensor_bb: Bitboard,
+    engine: &GameEngine,
+    feedback: &feedback::BoardFeedback,
+) -> String {
     let has_sensor = sensor_bb.contains(square);
+    let feedback_kind = feedback.get(square);
 
-    // In playing, show piece types or detect discrepancies
-    if let Some(piece) = engine.piece_at(square) {
-        // Should have a piece here
+    // Determine base symbol
+    let base_symbol = if let Some(piece) = engine.piece_at(square) {
         if has_sensor {
             // Correct - show piece type
             match (piece.role, piece.color) {
-                (Role::Pawn, Color::White) => " P ",
-                (Role::Knight, Color::White) => " N ",
-                (Role::Bishop, Color::White) => " B ",
-                (Role::Rook, Color::White) => " R ",
-                (Role::Queen, Color::White) => " Q ",
-                (Role::King, Color::White) => " K ",
-                (Role::Pawn, Color::Black) => " p ",
-                (Role::Knight, Color::Black) => " n ",
-                (Role::Bishop, Color::Black) => " b ",
-                (Role::Rook, Color::Black) => " r ",
-                (Role::Queen, Color::Black) => " q ",
-                (Role::King, Color::Black) => " k ",
+                (Role::Pawn, Color::White) => "P",
+                (Role::Knight, Color::White) => "N",
+                (Role::Bishop, Color::White) => "B",
+                (Role::Rook, Color::White) => "R",
+                (Role::Queen, Color::White) => "Q",
+                (Role::King, Color::White) => "K",
+                (Role::Pawn, Color::Black) => "p",
+                (Role::Knight, Color::Black) => "n",
+                (Role::Bishop, Color::Black) => "b",
+                (Role::Rook, Color::Black) => "r",
+                (Role::Queen, Color::Black) => "q",
+                (Role::King, Color::Black) => "k",
             }
         } else {
-            // Missing piece
-            " ○ "
+            "○" // Missing piece
         }
+    } else if has_sensor {
+        "⚠" // Extra piece
     } else {
-        // Should be empty
-        if has_sensor {
-            // Extra piece
-            " ⚠ "
-        } else {
-            // Correct empty
-            " · "
+        "·" // Empty
+    };
+
+    // Apply color based on feedback kind
+    match feedback_kind {
+        Some(SquareFeedback::Destination) => {
+            format!("\x1b[42m {} \x1b[0m", base_symbol) // Green background
         }
+        Some(SquareFeedback::Capture) => {
+            format!("\x1b[43m {} \x1b[0m", base_symbol) // Yellow background
+        }
+        None => format!(" {} ", base_symbol),
     }
 }
