@@ -1,4 +1,4 @@
-use shakmaty::{Bitboard, Chess, EnPassantMode, Move, Piece, Position, Role, Square, fen::Fen};
+use shakmaty::{Bitboard, Chess, EnPassantMode, Piece, Position, Role, Square, fen::Fen};
 
 /// Core game engine that processes sensor input and maintains game state
 #[derive(Default)]
@@ -59,55 +59,14 @@ impl GameEngine {
                 continue;
             }
 
-            let expected_bb = self.compute_bitboard_after_move(mv);
+            let mut after = self.position.clone();
+            after.play_unchecked(mv);
 
-            if expected_bb == current_bb {
-                self.position.play_unchecked(mv);
+            if after.board().occupied() == current_bb {
+                self.position = after;
                 break;
             }
         }
-    }
-
-    /// Computes the expected bitboard after applying a move.
-    ///
-    /// Used during move detection to match physical board states from sensors against legal chess moves.
-    fn compute_bitboard_after_move(&self, mv: Move) -> Bitboard {
-        let mut bb = self.position.board().occupied();
-
-        match mv {
-            Move::Normal {
-                from, to, capture, ..
-            } => {
-                bb.toggle(from);
-
-                // For captures: square stays occupied (different piece)
-                // For non-captures: square becomes occupied
-                if capture.is_none() {
-                    bb.toggle(to);
-                }
-            }
-            Move::EnPassant { from, to } => {
-                bb.toggle(from);
-                let captured_sq = Square::from_coords(to.file(), from.rank());
-                bb.toggle(captured_sq); // Remove captured pawn (different square than 'to')
-                bb.toggle(to); // Place capturing pawn
-            }
-            Move::Castle { king, rook } => {
-                let side = mv
-                    .castling_side()
-                    .expect("Castle move must have a castling side");
-                let color = self.position.turn();
-                bb.toggle(king);
-                bb.toggle(rook);
-                bb.toggle(side.king_to(color));
-                bb.toggle(side.rook_to(color));
-            }
-            Move::Put { .. } => {
-                unreachable!("Put moves are not supported in standard chess")
-            }
-        }
-
-        bb
     }
 }
 
