@@ -66,9 +66,9 @@ impl GameEngine {
     /// Tracks changes in piece positions and executes legal moves when pieces are placed.
     pub fn tick(&mut self, current_bb: Bitboard) -> GameState {
         self.process_moves(current_bb);
+
         let expected = self.position.board().occupied();
         let lifted = expected & !current_bb;
-
         GameState::new(self.position.legal_moves(), lifted.single_square())
     }
 
@@ -79,14 +79,17 @@ impl GameEngine {
         }
 
         // What changed since last tick?
-        let placed = current_bb & !self.last_bitboard; // Pieces added
+        let placed = current_bb & !self.last_bitboard; // Pieces added this tick
+        let expected = self.position.board().occupied();
+        let lifted = expected & !current_bb; // Pieces lifted from actual game
 
         // Update last_bitboard
         self.last_bitboard = current_bb;
 
         // Wait until pieces are placed before processing moves.
         // This allows lifting pieces without triggering move execution.
-        if placed.is_empty() {
+        // Exception: If exactly 2 pieces are lifted, process anyway as this could be en passant.
+        if placed.is_empty() && lifted.count() != 2 {
             return;
         }
 
@@ -376,14 +379,28 @@ mod tests {
         assert_piece(&engine, "e4", Role::Pawn, Color::White);
     }
 
-    #[test]
-    fn test_en_passant() {
+    #[test_case("e5. d5. d6."; "capture first")]
+    #[test_case("e5. d6. d5."; "capture last")]
+    fn test_en_passant(moves: &str) {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
 
-        BoardScript::parse("e5. d5 d6.").execute(&mut engine);
+        BoardScript::parse(moves).execute(&mut engine);
+        assert_empty(&engine, "e5");
         assert_piece(&engine, "d6", Role::Pawn, Color::White);
         assert_empty(&engine, "d5");
+    }
+
+    #[test_case("e5d6.  d6. e6. "; "correction")]
+    #[test_case("e5e6."; "direct")]
+    fn test_regular_pawn_move_with_en_passant_available(moves: &str) {
+        let mut engine =
+            GameEngine::from_fen("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
+
+        BoardScript::parse(moves).execute(&mut engine);
+        assert_piece(&engine, "e6", Role::Pawn, Color::White);
+        assert_piece(&engine, "d5", Role::Pawn, Color::Black);
+        assert_empty(&engine, "e5");
     }
 
     #[test_case("e1. g1. h1. f1."; "king first, slow")]
