@@ -157,7 +157,25 @@ fn draw_dual_boards(sensor: &mut MockPieceSensor, engine: &mut GameEngine) {
     // Show lifted piece info
     if let Some(lifted_square) = state.lifted_piece() {
         println!("\n🔵 Lifted: {}", lifted_square);
-        println!("   Legal destinations: {}", feedback.squares().len());
+        println!(
+            "   Legal destinations: {}",
+            feedback
+                .squares()
+                .iter()
+                .filter(|(_, t)| matches!(t, SquareFeedback::Destination | SquareFeedback::Capture))
+                .count()
+        );
+    }
+    if let Some(captured_square) = state.captured_piece() {
+        println!("\n🔴 Captured: {}", captured_square);
+        println!(
+            "   Legal captors: {}",
+            feedback
+                .squares()
+                .iter()
+                .filter(|(_, t)| matches!(t, SquareFeedback::Origin))
+                .count()
+        );
     }
 }
 
@@ -201,10 +219,13 @@ fn get_game_state_symbol(
     // Apply color based on feedback kind
     match feedback_kind {
         Some(SquareFeedback::Destination) => {
-            format!("\x1b[42m {} \x1b[0m", base_symbol) // Green background
+            format!("\x1b[44m {} \x1b[0m", base_symbol) // Blue - place here
         }
         Some(SquareFeedback::Capture) => {
-            format!("\x1b[43m {} \x1b[0m", base_symbol) // Yellow background
+            format!("\x1b[41m {} \x1b[0m", base_symbol) // Red - capture here
+        }
+        Some(SquareFeedback::Origin) => {
+            format!("\x1b[42m {} \x1b[0m", base_symbol) // Green - piece origin
         }
         None => format!(" {} ", base_symbol),
     }
