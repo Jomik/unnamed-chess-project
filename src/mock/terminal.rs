@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use super::MockPieceSensor;
+use super::ScriptedSensor;
 use crate::feedback::{self, FeedbackSource, SquareFeedback};
 use crate::game_logic::GameEngine;
 use shakmaty::{
@@ -17,11 +17,12 @@ fn clear_screen() {
 ///
 /// Displays raw sensor state alongside interpreted game state.
 pub fn run_interactive_terminal() {
-    let mut sensor = MockPieceSensor::new();
+    let mut sensor = ScriptedSensor::new();
     let mut engine = GameEngine::new();
+    let mut last_state = engine.tick(sensor.read_positions());
 
     clear_screen();
-    draw_interface(&mut sensor, &mut engine);
+    draw_interface(&sensor, &engine, &last_state);
 
     loop {
         print!("> ");
@@ -42,20 +43,6 @@ pub fn run_interactive_terminal() {
         }
 
         match parts[0] {
-            "t" => {
-                if parts.len() < 2 {
-                    println!("Usage: t <square>");
-                } else {
-                    match parts[1].parse::<Square>() {
-                        Ok(square) => {
-                            sensor.toggle(square);
-                            clear_screen();
-                            draw_interface(&mut sensor, &mut engine);
-                        }
-                        Err(e) => println!("Invalid square: {}", e),
-                    }
-                }
-            }
             "load" => {
                 if parts.len() < 2 {
                     println!("Usage: load <fen> | load startpos");
@@ -72,8 +59,9 @@ pub fn run_interactive_terminal() {
                             if let Ok(chess) = fen.into_position::<Chess>(CastlingMode::Standard) {
                                 sensor.load_bitboard(chess.board().occupied());
                                 engine = GameEngine::from_position(chess);
+                                last_state = engine.tick(sensor.read_positions());
                                 clear_screen();
-                                draw_interface(&mut sensor, &mut engine);
+                                draw_interface(&sensor, &engine, &last_state);
                                 println!("\n✅ Position loaded from FEN");
                             } else {
                                 println!("❌ Invalid FEN setup");
@@ -84,39 +72,52 @@ pub fn run_interactive_terminal() {
                 }
             }
             "r" => {
-                sensor = MockPieceSensor::new();
+                sensor = ScriptedSensor::new();
                 engine = GameEngine::new();
+                last_state = engine.tick(sensor.read_positions());
                 clear_screen();
-                draw_interface(&mut sensor, &mut engine);
+                draw_interface(&sensor, &engine, &last_state);
                 println!("\n🔄 Reset to initial state");
             }
             "p" => {
                 clear_screen();
-                draw_interface(&mut sensor, &mut engine);
+                draw_interface(&sensor, &engine, &last_state);
             }
             "q" => break,
-            _ => println!("Unknown command"),
+            _ => {
+                // Treat input as BoardScript
+                match sensor.push_script(&input) {
+                    Ok(()) => {
+                        sensor.drain(|bb| {
+                            last_state = engine.tick(bb);
+                        });
+                        clear_screen();
+                        draw_interface(&sensor, &engine, &last_state);
+                    }
+                    Err(e) => {
+                        println!("❌ {}", e);
+                    }
+                }
+            }
         }
     }
 }
 
-/// Draws the complete interface: help text, phase, events, and dual boards.
-fn draw_interface(sensor: &mut MockPieceSensor, engine: &mut GameEngine) {
+/// Draws the complete interface: help text and dual boards.
+fn draw_interface(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl FeedbackSource) {
     println!("♟️  Chess Board Sensor Simulator");
     println!();
-
+    println!("Commands: <script> | load <fen> | r (reset) | p (refresh) | q (quit)");
+    println!("Script format: e2e4. (toggle squares, '.' to tick)");
     println!();
-    println!("Commands: t <square> | load <fen> | r (reset) | p (refresh) | q (quit)");
-    println!();
 
-    draw_dual_boards(sensor, engine);
+    draw_dual_boards(sensor, engine, state);
 }
 
 /// Draws both boards side-by-side: raw sensors (left) and game state (right).
-fn draw_dual_boards(sensor: &mut MockPieceSensor, engine: &mut GameEngine) {
+fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl FeedbackSource) {
     let sensor_bb = sensor.read_positions();
-    let state = engine.tick(sensor_bb);
-    let feedback = feedback::compute_feedback(&state);
+    let feedback = feedback::compute_feedback(state);
 
     println!("╔═════════════════════════════╦═════════════════════════════╗");
     println!("║       Raw Sensors           ║       Game State            ║");
