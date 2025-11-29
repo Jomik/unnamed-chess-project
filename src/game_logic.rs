@@ -8,15 +8,7 @@ use shakmaty::{
 pub struct GameState {
     legal_moves: MoveList,
     lifted_piece: Option<Square>,
-}
-
-impl GameState {
-    fn new(legal_moves: MoveList, lifted_piece: Option<Square>) -> Self {
-        Self {
-            legal_moves,
-            lifted_piece,
-        }
-    }
+    captured_piece: Option<Square>,
 }
 
 impl FeedbackSource for GameState {
@@ -26,6 +18,10 @@ impl FeedbackSource for GameState {
 
     fn lifted_piece(&self) -> Option<Square> {
         self.lifted_piece
+    }
+
+    fn captured_piece(&self) -> Option<Square> {
+        self.captured_piece
     }
 }
 
@@ -67,9 +63,13 @@ impl GameEngine {
     pub fn tick(&mut self, current_bb: Bitboard) -> GameState {
         self.process_moves(current_bb);
 
-        let expected = self.position.board().occupied();
-        let lifted = expected & !current_bb;
-        GameState::new(self.position.legal_moves(), lifted.single_square())
+        let lifted = self.position.us() & !current_bb;
+        let captured = self.position.them() & !current_bb;
+        GameState {
+            legal_moves: self.position.legal_moves(),
+            lifted_piece: lifted.single_square(),
+            captured_piece: captured.single_square(),
+        }
     }
 
     /// Process any completed moves based on sensor state
