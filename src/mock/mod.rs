@@ -1,5 +1,5 @@
-mod sensor;
+mod script;
 mod terminal;
 
-pub use sensor::MockPieceSensor;
+pub use script::ScriptedSensor;
 pub use terminal::run_interactive_terminal;
