@@ -100,6 +100,13 @@ impl GameEngine {
                 continue;
             }
 
+            // For normal captures, verify the piece was placed on the capture square.
+            // En passant is excluded because the destination differs from the captured pawn's square,
+            // and its unique board state is already validated by the bitboard check below.
+            if mv.is_capture() && Some(mv.to()) != placed.first() && !mv.is_en_passant() {
+                continue;
+            }
+
             let mut after = self.position.clone();
             after.play_unchecked(mv);
 
@@ -406,5 +413,17 @@ mod tests {
         let state = engine.tick(bb);
 
         assert_eq!(state.lifted_piece(), None);
+    }
+
+    #[test]
+    fn test_captures_correct() {
+        let mut engine =
+            GameEngine::from_fen("Q2qkbnr/p1pppppp/b1n5/8/8/8/PP1PPPPP/RNBQKBNR w KQk - 0 1");
+
+        execute_script(&mut engine, "a8. d8. d8.");
+
+        assert_piece(&engine, "c6", Role::Knight, Color::Black);
+        assert_piece(&engine, "d8", Role::Queen, Color::White);
+        assert_empty(&engine, "a8");
     }
 }
