@@ -1,4 +1,4 @@
-use crate::feedback::FeedbackSource;
+use crate::feedback::{CheckInfo, FeedbackSource};
 use shakmaty::{
     Bitboard, Chess, EnPassantMode, Move, MoveList, Piece, Position, Role, Square, fen::Fen,
 };
@@ -9,6 +9,8 @@ pub struct GameState {
     legal_moves: MoveList,
     lifted_piece: Option<Square>,
     captured_piece: Option<Square>,
+    king_square: Square,
+    checkers: Bitboard,
 }
 
 impl FeedbackSource for GameState {
@@ -22,6 +24,17 @@ impl FeedbackSource for GameState {
 
     fn captured_piece(&self) -> Option<Square> {
         self.captured_piece
+    }
+
+    fn check_info(&self) -> Option<CheckInfo> {
+        if self.checkers.is_empty() {
+            None
+        } else {
+            Some(CheckInfo {
+                king_square: self.king_square,
+                checkers: self.checkers,
+            })
+        }
     }
 }
 
@@ -69,6 +82,12 @@ impl GameEngine {
             legal_moves: self.position.legal_moves(),
             lifted_piece: lifted.single_square(),
             captured_piece: captured.single_square(),
+            checkers: self.position.checkers(),
+            king_square: self
+                .position
+                .our(Role::King)
+                .first()
+                .expect("king must exist"),
         }
     }
 

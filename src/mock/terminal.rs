@@ -228,6 +228,12 @@ fn get_game_state_symbol(
         Some(SquareFeedback::Origin) => {
             format!("\x1b[42m {} \x1b[0m", base_symbol) // Green - piece origin
         }
+        Some(SquareFeedback::Check) => {
+            format!("\x1b[45m {} \x1b[0m", base_symbol) // Magenta - king in check
+        }
+        Some(SquareFeedback::Checker) => {
+            format!("\x1b[43m {} \x1b[0m", base_symbol) // Yellow - piece giving check
+        }
         None => format!(" {} ", base_symbol),
     }
 }
