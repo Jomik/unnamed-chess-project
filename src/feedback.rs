@@ -1,4 +1,13 @@
-use shakmaty::{Move, Square};
+use shakmaty::{Bitboard, Move, Square};
+
+/// Check status information for feedback display
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CheckInfo {
+    /// Square of the king that is in check
+    pub king_square: Square,
+    /// Bitboard of pieces giving check (1-2 pieces)
+    pub checkers: Bitboard,
+}
 
 /// Type of visual feedback for an individual square
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,6 +18,10 @@ pub enum SquareFeedback {
     Capture,
     /// Lift this piece to move or capture (origin of move)
     Origin,
+    /// King in check
+    Check,
+    /// Piece attacking king
+    Checker,
 }
 
 /// Contains the set of squares and their associated feedback types for the current board state.
@@ -73,6 +86,9 @@ pub trait FeedbackSource {
 
     /// Get the square of the opponent's removed piece (for captures in progress)
     fn captured_piece(&self) -> Option<Square>;
+
+    /// Get check information if the side to move is in check
+    fn check_info(&self) -> Option<CheckInfo>;
 }
 
 /// Compute visual feedback based on current game state.
@@ -96,7 +112,13 @@ pub fn compute_feedback(source: &impl FeedbackSource) -> BoardFeedback {
         (Some(to), Some(from)) => show_capture_completion(source.legal_moves(), from, to),
 
         // Nothing happening
-        (None, None) => BoardFeedback::default(),
+        (None, None) => {
+            if let Some(check_info) = source.check_info() {
+                show_check_feedback(&check_info)
+            } else {
+                BoardFeedback::default()
+            }
+        }
     }
 }
 
@@ -147,6 +169,19 @@ fn show_capture_completion(
         .into()
 }
 
+/// Show check and checker squares when king is in check
+fn show_check_feedback(check_info: &CheckInfo) -> BoardFeedback {
+    std::iter::once((check_info.king_square, SquareFeedback::Check))
+        .chain(
+            check_info
+                .checkers
+                .into_iter()
+                .map(|sq| (sq, SquareFeedback::Checker)),
+        )
+        .collect::<Vec<_>>()
+        .into()
+}
+
 /// Classify a move as either a capture or regular destination
 fn classify_move(mv: &Move) -> (Square, SquareFeedback) {
     if mv.is_capture() {
@@ -175,12 +210,61 @@ fn captures_square(mv: &Move, captured_sq: Square) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shakmaty::{CastlingMode, Chess, Position, fen::Fen};
+    use shakmaty::{CastlingMode, Chess, Position, Role, fen::Fen};
 
     struct MockFeedbackSource {
         moves: Vec<Move>,
         lifted: Option<Square>,
         captured: Option<Square>,
+        check: Option<CheckInfo>,
+    }
+
+    impl MockFeedbackSource {
+        /// Create from starting chess position
+        fn new() -> Self {
+            Self::from_position(Chess::default())
+        }
+
+        /// Create from a FEN string
+        fn from_fen(fen: &str) -> Self {
+            let pos: Chess = fen
+                .parse::<Fen>()
+                .expect("invalid FEN")
+                .into_position(CastlingMode::Standard)
+                .expect("invalid position");
+            Self::from_position(pos)
+        }
+
+        /// Create from an existing chess position
+        fn from_position(pos: Chess) -> Self {
+            let check = if pos.is_check() {
+                Some(CheckInfo {
+                    king_square: pos.our(Role::King).first().expect("king must exist"),
+                    checkers: pos.checkers(),
+                })
+            } else {
+                None
+            };
+
+            Self {
+                moves: pos.legal_moves().into_iter().collect(),
+                lifted: None,
+                captured: None,
+                check,
+            }
+        }
+
+        /// Set the lifted piece square
+        fn lifted(mut self, square: Square) -> Self {
+            self.lifted = Some(square);
+            self
+        }
+
+        /// Set the captured piece square
+        fn captured(mut self, square: Square) -> Self {
+            self.captured = Some(square);
+            self
+        }
     }
 
     impl FeedbackSource for MockFeedbackSource {
@@ -195,30 +279,25 @@ mod tests {
         fn captured_piece(&self) -> Option<Square> {
             self.captured
         }
+
+        fn check_info(&self) -> Option<CheckInfo> {
+            self.check
+        }
     }
 
     #[test]
     fn test_no_feedback_when_nothing_happening() {
-        let pos = Chess::default();
-        let source = MockFeedbackSource {
-            moves: pos.legal_moves().into_iter().collect(),
-            lifted: None,
-            captured: None,
-        };
+        let source = MockFeedbackSource::new();
 
         let feedback = compute_feedback(&source);
+
         assert_eq!(feedback.squares().len(), 0);
         assert!(feedback.is_empty());
     }
 
     #[test]
     fn test_show_destinations_when_piece_lifted() {
-        let pos = Chess::default();
-        let source = MockFeedbackSource {
-            moves: pos.legal_moves().into_iter().collect(),
-            lifted: Some(Square::E2),
-            captured: None,
-        };
+        let source = MockFeedbackSource::new().lifted(Square::E2);
 
         let feedback = compute_feedback(&source);
 
@@ -231,16 +310,10 @@ mod tests {
     #[test]
     fn test_show_capture_options_when_opponent_piece_removed() {
         // Position where e4 pawn can capture d5, and c3 knight can capture d5
-        let fen: Fen = "rnbqkbnr/ppp1pppp/8/3p4/4P3/2N5/PPPP1PPP/R1BQKBNR w KQkq - 0 1"
-            .parse()
-            .unwrap();
-        let pos: Chess = fen.into_position(CastlingMode::Standard).unwrap();
-
-        let source = MockFeedbackSource {
-            moves: pos.legal_moves().into_iter().collect(),
-            lifted: None,
-            captured: Some(Square::D5),
-        };
+        let source = MockFeedbackSource::from_fen(
+            "rnbqkbnr/ppp1pppp/8/3p4/4P3/2N5/PPPP1PPP/R1BQKBNR w KQkq - 0 1",
+        )
+        .captured(Square::D5);
 
         let feedback = compute_feedback(&source);
 
@@ -251,16 +324,10 @@ mod tests {
 
     #[test]
     fn test_show_capture_options_when_en_passant() {
-        let fen: Fen = "rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1"
-            .parse()
-            .unwrap();
-        let pos: Chess = fen.into_position(CastlingMode::Standard).unwrap();
-
-        let source = MockFeedbackSource {
-            moves: pos.legal_moves().into_iter().collect(),
-            lifted: None,
-            captured: Some(Square::D5),
-        };
+        let source = MockFeedbackSource::from_fen(
+            "rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1",
+        )
+        .captured(Square::D5);
 
         let feedback = compute_feedback(&source);
 
@@ -270,16 +337,11 @@ mod tests {
 
     #[test]
     fn test_show_capture_completion_when_en_passant() {
-        let fen: Fen = "rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1"
-            .parse()
-            .unwrap();
-        let pos: Chess = fen.into_position(CastlingMode::Standard).unwrap();
-
-        let source = MockFeedbackSource {
-            moves: pos.legal_moves().into_iter().collect(),
-            lifted: Some(Square::E5),
-            captured: Some(Square::D5),
-        };
+        let source = MockFeedbackSource::from_fen(
+            "rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1",
+        )
+        .lifted(Square::E5)
+        .captured(Square::D5);
 
         let feedback = compute_feedback(&source);
 
@@ -289,16 +351,11 @@ mod tests {
 
     #[test]
     fn test_show_destination_when_both_removed_and_lifted() {
-        let fen: Fen = "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1"
-            .parse()
-            .unwrap();
-        let pos: Chess = fen.into_position(CastlingMode::Standard).unwrap();
-
-        let source = MockFeedbackSource {
-            moves: pos.legal_moves().into_iter().collect(),
-            lifted: Some(Square::E4),
-            captured: Some(Square::D5),
-        };
+        let source = MockFeedbackSource::from_fen(
+            "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+        )
+        .lifted(Square::E4)
+        .captured(Square::D5);
 
         let feedback = compute_feedback(&source);
 
@@ -308,21 +365,56 @@ mod tests {
 
     #[test]
     fn test_distinguish_captures() {
-        let fen: Fen = "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1"
-            .parse()
-            .unwrap();
-        let pos: Chess = fen.into_position(CastlingMode::Standard).unwrap();
-
-        let source = MockFeedbackSource {
-            moves: pos.legal_moves().into_iter().collect(),
-            lifted: Some(Square::E4),
-            captured: None,
-        };
+        let source = MockFeedbackSource::from_fen(
+            "rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1",
+        )
+        .lifted(Square::E4);
 
         let feedback = compute_feedback(&source);
 
         assert_eq!(feedback.get(Square::E4), Some(SquareFeedback::Origin));
         assert_eq!(feedback.get(Square::E5), Some(SquareFeedback::Destination));
         assert_eq!(feedback.get(Square::D5), Some(SquareFeedback::Capture));
+    }
+
+    #[test]
+    fn test_check_feedback_shown_when_idle() {
+        // Black king in check from white queen on h5
+        let source = MockFeedbackSource::from_fen(
+            "rnbqkbnr/pppp2pp/8/4pp1Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1",
+        );
+
+        let feedback = compute_feedback(&source);
+
+        assert_eq!(feedback.get(Square::E8), Some(SquareFeedback::Check));
+        assert_eq!(feedback.get(Square::H5), Some(SquareFeedback::Checker));
+    }
+
+    #[test]
+    fn test_check_feedback_not_shown_when_piece_lifted() {
+        // Black king in check, but black is lifting a piece to block
+        let source = MockFeedbackSource::from_fen(
+            "rnbqkbnr/pppp2pp/8/4pp1Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1",
+        )
+        .lifted(Square::G8); // Lifting knight to potentially block
+
+        let feedback = compute_feedback(&source);
+
+        // Should show destinations, not check feedback
+        assert_eq!(feedback.get(Square::G8), Some(SquareFeedback::Origin));
+        assert_eq!(feedback.get(Square::E8), None); // No check highlight
+        assert_eq!(feedback.get(Square::H5), None); // No checker highlight
+    }
+
+    #[test]
+    fn test_double_check_feedback() {
+        // Double check: black king attacked by both rook and bishop
+        let source = MockFeedbackSource::from_fen("4k3/8/8/7B/8/8/8/4R2K b - - 0 1");
+
+        let feedback = compute_feedback(&source);
+
+        assert_eq!(feedback.get(Square::E8), Some(SquareFeedback::Check));
+        assert_eq!(feedback.get(Square::E1), Some(SquareFeedback::Checker)); // Rook
+        assert_eq!(feedback.get(Square::H5), Some(SquareFeedback::Checker)); // Bishop
     }
 }
