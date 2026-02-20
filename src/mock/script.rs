@@ -12,6 +12,9 @@ pub enum ParseError {
     /// A piece was placed on an empty square without an explicit color prefix.
     #[error("{0}: missing color for piece placement")]
     MissingColor(String),
+    /// A square is occupied by pieces of both colors, which is physically impossible.
+    #[error("square(s) occupied by both colors: {0}")]
+    OverlappingSquares(String),
 }
 
 /// A scriptable mock sensor that processes BoardScript format.
@@ -36,32 +39,34 @@ impl ScriptedSensor {
         let chess = Chess::default();
         let board = chess.board();
         Self::from_bitboards(board.by_color(Color::White), board.by_color(Color::Black))
+            .expect("starting position has no overlapping squares")
     }
 
     /// Create from separate white and black bitboards.
-    pub fn from_bitboards(white: Bitboard, black: Bitboard) -> Self {
-        Self {
+    ///
+    /// Returns [`ParseError::OverlappingSquares`] if any square appears in both bitboards.
+    pub fn from_bitboards(white: Bitboard, black: Bitboard) -> Result<Self, ParseError> {
+        check_overlap(white, black)?;
+        Ok(Self {
             positions: ByColor { white, black },
             pending_batches: VecDeque::new(),
-        }
-    }
-
-    /// Combined occupancy of both colors.
-    #[inline]
-    pub fn read_positions(&self) -> Bitboard {
-        self.positions.white | self.positions.black
+        })
     }
 
     /// Per-color piece positions.
     #[inline]
-    pub fn positions(&self) -> ByColor<Bitboard> {
+    pub fn read_positions(&self) -> ByColor<Bitboard> {
         self.positions
     }
 
     /// Load separate white and black bitboards directly (e.g. when loading a FEN position).
-    pub fn load_bitboards(&mut self, white: Bitboard, black: Bitboard) {
+    ///
+    /// Returns [`ParseError::OverlappingSquares`] if any square appears in both bitboards.
+    pub fn load_bitboards(&mut self, white: Bitboard, black: Bitboard) -> Result<(), ParseError> {
+        check_overlap(white, black)?;
         self.positions = ByColor { white, black };
         self.pending_batches.clear();
+        Ok(())
     }
 
     /// Parse and queue additional script for execution.
@@ -84,27 +89,27 @@ impl ScriptedSensor {
         Ok(())
     }
 
-    /// Execute next pending batch, returning new combined occupancy.
+    /// Execute next pending batch, returning new per-color positions.
     ///
     /// Returns `Ok(None)` if no pending batches remain.
     /// Returns `Err` if a placement is attempted on an empty square without a color.
-    pub fn tick(&mut self) -> Result<Option<Bitboard>, ParseError> {
+    pub fn tick(&mut self) -> Result<Option<ByColor<Bitboard>>, ParseError> {
         let Some(batch) = self.pending_batches.pop_front() else {
             return Ok(None);
         };
         for (square, color) in batch {
             self.toggle_square(square, color)?;
         }
-        Ok(Some(self.positions.white | self.positions.black))
+        Ok(Some(self.positions))
     }
 
     /// Execute all pending batches, calling the provided callback for each.
     pub fn drain<F>(&mut self, mut on_tick: F) -> Result<(), ParseError>
     where
-        F: FnMut(Bitboard),
+        F: FnMut(ByColor<Bitboard>),
     {
-        while let Some(bb) = self.tick()? {
-            on_tick(bb);
+        while let Some(positions) = self.tick()? {
+            on_tick(positions);
         }
         Ok(())
     }
@@ -123,6 +128,22 @@ impl ScriptedSensor {
         };
         self.positions[color].toggle(square);
         Ok(())
+    }
+}
+
+/// Returns `Err(ParseError::OverlappingSquares)` if `white` and `black` share any square.
+fn check_overlap(white: Bitboard, black: Bitboard) -> Result<(), ParseError> {
+    let overlap = white & black;
+    if overlap.is_empty() {
+        Ok(())
+    } else {
+        Err(ParseError::OverlappingSquares(
+            overlap
+                .into_iter()
+                .map(|sq| sq.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ))
     }
 }
 
@@ -200,7 +221,7 @@ mod tests {
     #[test]
     fn test_parse_error_does_not_modify_state() {
         let mut sensor = ScriptedSensor::new();
-        let initial_bb = sensor.read_positions();
+        let initial = sensor.read_positions();
 
         // Push valid script
         sensor.push_script("e2. ").unwrap();
@@ -210,9 +231,9 @@ mod tests {
         assert!(result.is_err());
 
         // The valid batch should still be pending
-        let bb = sensor.tick().unwrap();
-        assert!(bb.is_some());
-        assert_ne!(bb.unwrap(), initial_bb);
+        let positions = sensor.tick().unwrap();
+        assert!(positions.is_some());
+        assert_ne!(positions.unwrap(), initial);
     }
 
     #[test]
@@ -221,54 +242,61 @@ mod tests {
             | Bitboard::from_rank(shakmaty::Rank::Second);
         let black = Bitboard::from_rank(shakmaty::Rank::Seventh)
             | Bitboard::from_rank(shakmaty::Rank::Eighth);
-        let sensor = ScriptedSensor::from_bitboards(white, black);
-        assert_eq!(sensor.positions().white, white);
-        assert_eq!(sensor.positions().black, black);
-        assert_eq!(sensor.read_positions(), white | black);
+        let sensor = ScriptedSensor::from_bitboards(white, black).unwrap();
+        assert_eq!(sensor.read_positions(), ByColor { white, black });
+    }
+
+    #[test]
+    fn test_from_bitboards_rejects_overlap() {
+        let both = Bitboard::from_rank(shakmaty::Rank::Fourth);
+        assert!(matches!(
+            ScriptedSensor::from_bitboards(both, both),
+            Err(ParseError::OverlappingSquares(_))
+        ));
     }
 
     #[test]
     fn test_toggle_removes_from_white() {
         let white = Bitboard::from_rank(shakmaty::Rank::Second);
         let black = Bitboard::from_rank(shakmaty::Rank::Seventh);
-        let mut sensor = ScriptedSensor::from_bitboards(white, black);
+        let mut sensor = ScriptedSensor::from_bitboards(white, black).unwrap();
 
         sensor.push_script("e2.").unwrap();
         sensor.tick().unwrap();
 
-        assert!(!sensor.positions().white.contains(Square::E2));
-        assert_eq!(sensor.positions().black, black);
+        assert!(!sensor.read_positions().white.contains(Square::E2));
+        assert_eq!(sensor.read_positions().black, black);
     }
 
     #[test]
     fn test_toggle_removes_from_black() {
         let white = Bitboard::from_rank(shakmaty::Rank::Second);
         let black = Bitboard::from_rank(shakmaty::Rank::Seventh);
-        let mut sensor = ScriptedSensor::from_bitboards(white, black);
+        let mut sensor = ScriptedSensor::from_bitboards(white, black).unwrap();
 
         sensor.push_script("e7.").unwrap();
         sensor.tick().unwrap();
 
-        assert!(!sensor.positions().black.contains(Square::E7));
-        assert_eq!(sensor.positions().white, white);
+        assert!(!sensor.read_positions().black.contains(Square::E7));
+        assert_eq!(sensor.read_positions().white, white);
     }
 
     #[test]
     fn test_toggle_places_with_color_prefix() {
         let white = Bitboard::from_rank(shakmaty::Rank::Second);
         let black = Bitboard::from_rank(shakmaty::Rank::Seventh);
-        let mut sensor = ScriptedSensor::from_bitboards(white, black);
+        let mut sensor = ScriptedSensor::from_bitboards(white, black).unwrap();
 
         sensor.push_script("We4.").unwrap();
         sensor.tick().unwrap();
 
-        assert!(sensor.positions().white.contains(Square::E4));
+        assert!(sensor.read_positions().white.contains(Square::E4));
     }
 
     #[test]
     fn test_tick_error_on_placement_without_color() {
         let mut sensor =
-            ScriptedSensor::from_bitboards(Bitboard::EMPTY, Bitboard::EMPTY);
+            ScriptedSensor::from_bitboards(Bitboard::EMPTY, Bitboard::EMPTY).unwrap();
         sensor.push_script("e4.").unwrap();
         assert_eq!(
             sensor.tick(),
@@ -281,10 +309,18 @@ mod tests {
         let mut sensor = ScriptedSensor::new();
         let white = Bitboard::from_rank(shakmaty::Rank::Third);
         let black = Bitboard::from_rank(shakmaty::Rank::Sixth);
-        sensor.load_bitboards(white, black);
-        assert_eq!(sensor.positions().white, white);
-        assert_eq!(sensor.positions().black, black);
-        assert_eq!(sensor.read_positions(), white | black);
+        sensor.load_bitboards(white, black).unwrap();
+        assert_eq!(sensor.read_positions(), ByColor { white, black });
+    }
+
+    #[test]
+    fn test_load_bitboards_rejects_overlap() {
+        let mut sensor = ScriptedSensor::new();
+        let both = Bitboard::from_rank(shakmaty::Rank::Fourth);
+        assert!(matches!(
+            sensor.load_bitboards(both, both),
+            Err(ParseError::OverlappingSquares(_))
+        ));
     }
 
     #[test]
@@ -292,7 +328,7 @@ mod tests {
         let chess = Chess::default();
         let board = chess.board();
         let sensor = ScriptedSensor::new();
-        assert_eq!(sensor.positions().white, board.by_color(Color::White));
-        assert_eq!(sensor.positions().black, board.by_color(Color::Black));
+        assert_eq!(sensor.read_positions().white, board.by_color(Color::White));
+        assert_eq!(sensor.read_positions().black, board.by_color(Color::Black));
     }
 }

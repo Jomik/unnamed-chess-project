@@ -198,13 +198,14 @@ mod tests {
         let mut sensor = ScriptedSensor::from_bitboards(
             board.by_color(Color::White),
             board.by_color(Color::Black),
-        );
+        )
+        .expect("board positions cannot overlap");
         sensor
             .push_script(script)
             .expect("test script should be valid");
         sensor
-            .drain(|bb| {
-                engine.tick(bb);
+            .drain(|p| {
+                engine.tick(p.white | p.black);
             })
             .expect("test script should produce valid sensor state");
     }
