@@ -19,7 +19,8 @@ fn clear_screen() {
 pub fn run_interactive_terminal() {
     let mut sensor = ScriptedSensor::new();
     let mut engine = GameEngine::new();
-    let mut last_state = engine.tick(sensor.read_positions());
+    let positions = sensor.read_positions();
+    let mut last_state = engine.tick(positions.white | positions.black);
 
     clear_screen();
     draw_interface(&sensor, &engine, &last_state);
@@ -57,9 +58,16 @@ pub fn run_interactive_terminal() {
                     match fen_str.parse::<Fen>() {
                         Ok(fen) => {
                             if let Ok(chess) = fen.into_position::<Chess>(CastlingMode::Standard) {
-                                sensor.load_bitboard(chess.board().occupied());
+                                let board = chess.board();
+                                sensor
+                                    .load_bitboards(
+                                        board.by_color(Color::White),
+                                        board.by_color(Color::Black),
+                                    )
+                                    .expect("board positions cannot overlap");
                                 engine = GameEngine::from_position(chess);
-                                last_state = engine.tick(sensor.read_positions());
+                                let positions = sensor.read_positions();
+                                last_state = engine.tick(positions.white | positions.black);
                                 clear_screen();
                                 draw_interface(&sensor, &engine, &last_state);
                                 println!("\n✅ Position loaded from FEN");
@@ -74,7 +82,8 @@ pub fn run_interactive_terminal() {
             "r" => {
                 sensor = ScriptedSensor::new();
                 engine = GameEngine::new();
-                last_state = engine.tick(sensor.read_positions());
+                let positions = sensor.read_positions();
+                last_state = engine.tick(positions.white | positions.black);
                 clear_screen();
                 draw_interface(&sensor, &engine, &last_state);
                 println!("\n🔄 Reset to initial state");
@@ -86,11 +95,13 @@ pub fn run_interactive_terminal() {
             "q" => break,
             _ => {
                 // Treat input as BoardScript
-                match sensor.push_script(&input) {
+                let result = sensor.push_script(&input).and_then(|()| {
+                    sensor.drain(|p| {
+                        last_state = engine.tick(p.white | p.black);
+                    })
+                });
+                match result {
                     Ok(()) => {
-                        sensor.drain(|bb| {
-                            last_state = engine.tick(bb);
-                        });
                         clear_screen();
                         draw_interface(&sensor, &engine, &last_state);
                     }
@@ -116,7 +127,8 @@ fn draw_interface(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl Fee
 
 /// Draws both boards side-by-side: raw sensors (left) and game state (right).
 fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl FeedbackSource) {
-    let sensor_bb = sensor.read_positions();
+    let sensor_positions = sensor.read_positions();
+    let sensor_bb = sensor_positions.white | sensor_positions.black;
     let feedback = feedback::compute_feedback(state);
 
     println!("╔═════════════════════════════╦═════════════════════════════╗");

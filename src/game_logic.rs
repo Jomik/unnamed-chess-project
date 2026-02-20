@@ -194,17 +194,24 @@ mod tests {
 
     /// Helper to execute a script against an engine.
     fn execute_script(engine: &mut GameEngine, script: &str) {
-        let mut sensor = ScriptedSensor::from_bitboard(engine.last_bitboard);
+        let board = engine.position.board();
+        let mut sensor = ScriptedSensor::from_bitboards(
+            board.by_color(Color::White),
+            board.by_color(Color::Black),
+        )
+        .expect("board positions cannot overlap");
         sensor
             .push_script(script)
             .expect("test script should be valid");
-        sensor.drain(|bb| {
-            engine.tick(bb);
-        });
+        sensor
+            .drain(|p| {
+                engine.tick(p.white | p.black);
+            })
+            .expect("test script should produce valid sensor state");
     }
 
-    #[test_case("e2e3. "; "one tick")]
-    #[test_case("e2.  e3."; "two tick")]
+    #[test_case("e2 We3. "; "one tick")]
+    #[test_case("e2.  We3."; "two tick")]
     fn test_simple_move(moves: &str) {
         let mut engine = GameEngine::new();
 
@@ -218,7 +225,7 @@ mod tests {
     fn test_knight_move() {
         let mut engine = GameEngine::new();
 
-        execute_script(&mut engine, "g1.  f3.");
+        execute_script(&mut engine, "g1.  Wf3.");
 
         assert_empty(&engine, "g1");
         assert_piece(&engine, "f3", Role::Knight, Color::White);
@@ -228,7 +235,7 @@ mod tests {
     fn test_illegal_move_ignored() {
         let mut engine = GameEngine::new();
 
-        execute_script(&mut engine, "e2.  e5.");
+        execute_script(&mut engine, "e2.  We5.");
 
         // Illegal move should be ignored, board unchanged
         assert_piece(&engine, "e2", Role::Pawn, Color::White);
@@ -239,7 +246,7 @@ mod tests {
     fn test_game_sequence() {
         let mut engine = GameEngine::new();
 
-        execute_script(&mut engine, "e2e4. e7e5. g1f3. b8c6.");
+        execute_script(&mut engine, "e2 We4. e7 Be5. g1 Wf3. b8 Bc6.");
 
         assert_piece(&engine, "e4", Role::Pawn, Color::White);
         assert_piece(&engine, "e5", Role::Pawn, Color::Black);
@@ -252,7 +259,7 @@ mod tests {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/1pp1pppp/8/p2p4/P2P4/8/1PP1PPPP/RNBQKBNR w KQkq a6 0 1");
 
-        execute_script(&mut engine, "c1. g5.");
+        execute_script(&mut engine, "c1. Wg5.");
         assert_piece(&engine, "g5", Role::Bishop, Color::White);
         assert_empty(&engine, "c1");
     }
@@ -262,7 +269,7 @@ mod tests {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/1pp1pppp/8/p2p4/P2P4/8/1PP1PPPP/RNBQKBNR w KQkq a6 0 1");
 
-        execute_script(&mut engine, "a1. a3.");
+        execute_script(&mut engine, "a1. Wa3.");
         assert_piece(&engine, "a3", Role::Rook, Color::White);
         assert_empty(&engine, "a1");
     }
@@ -272,7 +279,7 @@ mod tests {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/1pp1pppp/8/p2p4/P2P4/8/1PP1PPPP/RNBQKBNR w KQkq a6 0 1");
 
-        execute_script(&mut engine, "e1.  d2.");
+        execute_script(&mut engine, "e1.  Wd2.");
         assert_piece(&engine, "d2", Role::King, Color::White);
         assert_empty(&engine, "e1");
     }
@@ -282,7 +289,7 @@ mod tests {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/1pp1pppp/8/p2p4/P2P4/8/1PP1PPPP/RNBQKBNR w KQkq a6 0 1");
 
-        execute_script(&mut engine, "d1. d3.");
+        execute_script(&mut engine, "d1. Wd3.");
         assert_piece(&engine, "d3", Role::Queen, Color::White);
         assert_empty(&engine, "d1");
     }
@@ -292,14 +299,14 @@ mod tests {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/ppp1pppp/8/3p4/2P5/8/PP1PPPPP/RNBQKBNR w KQkq d6 0 1");
 
-        execute_script(&mut engine, "d1. a4.");
+        execute_script(&mut engine, "d1. Wa4.");
         assert_piece(&engine, "a4", Role::Queen, Color::White);
         assert_empty(&engine, "d1");
     }
 
-    #[test_case("d5. e4.  d5."; "slow")]
-    #[test_case("d5 e4.  d5."; "quick take")]
-    #[test_case("d5.  e4 d5."; "quick move")]
+    #[test_case("d5. e4.  Wd5."; "slow")]
+    #[test_case("d5 e4.  Wd5."; "quick take")]
+    #[test_case("d5.  e4 Wd5."; "quick move")]
     fn test_capture(moves: &str) {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
@@ -320,8 +327,8 @@ mod tests {
         assert_piece(&engine, "e4", Role::Pawn, Color::White);
     }
 
-    #[test_case("e5. d5.  d6."; "capture first")]
-    #[test_case("e5.  d6.  d5."; "capture last")]
+    #[test_case("e5. d5.  Wd6."; "capture first")]
+    #[test_case("e5.  Wd6.  d5."; "capture last")]
     fn test_en_passant(moves: &str) {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
@@ -332,8 +339,8 @@ mod tests {
         assert_empty(&engine, "d5");
     }
 
-    #[test_case("e5d6.  d6.  e6.  "; "correction")]
-    #[test_case("e5e6."; "direct")]
+    #[test_case("e5 Wd6.  d6.  We6.  "; "correction")]
+    #[test_case("e5 We6."; "direct")]
     fn test_regular_pawn_move_with_en_passant_available(moves: &str) {
         let mut engine =
             GameEngine::from_fen("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
@@ -344,12 +351,12 @@ mod tests {
         assert_empty(&engine, "e5");
     }
 
-    #[test_case("e1.  g1.  h1.  f1."; "king first, slow")]
-    #[test_case("e1g1. h1f1."; "king first, quick")]
-    #[test_case("e1. h1. f1.  g1."; "rook first, slow")]
-    #[test_case("e1.  h1f1. g1."; "rook first, quick")]
-    #[test_case("e1h1. f1g1."; "two handed")]
-    #[test_case("e1.  h1g1.  g1f1.  g1. "; "rook slide")]
+    #[test_case("e1.  Wg1.  h1.  Wf1."; "king first, slow")]
+    #[test_case("e1 Wg1. h1 Wf1."; "king first, quick")]
+    #[test_case("e1. h1. Wf1.  Wg1."; "rook first, slow")]
+    #[test_case("e1.  h1 Wf1. Wg1."; "rook first, quick")]
+    #[test_case("e1 h1. Wf1 Wg1."; "two handed")]
+    #[test_case("e1.  h1 Wg1.  g1 Wf1.  Wg1. "; "rook slide")]
     fn test_castle_king_side(moves: &str) {
         let mut engine = GameEngine::from_fen(
             "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1",
@@ -362,12 +369,12 @@ mod tests {
         assert_empty(&engine, "h1");
     }
 
-    #[test_case("e1.  c1. a1. d1."; "king first, slow")]
-    #[test_case("e1c1.  a1d1."; "king first, quick")]
-    #[test_case("e1. a1. d1. c1. "; "rook first, slow")]
-    #[test_case("e1. a1d1. c1."; "quick")]
-    #[test_case("e1a1. c1d1."; "two handed")]
-    #[test_case("e1. a1b1. b1c1. c1d1.  c1. "; "rook slide")]
+    #[test_case("e1.  Wc1. a1. Wd1."; "king first, slow")]
+    #[test_case("e1 Wc1.  a1 Wd1."; "king first, quick")]
+    #[test_case("e1. a1. Wd1. Wc1. "; "rook first, slow")]
+    #[test_case("e1. a1 Wd1. Wc1."; "quick")]
+    #[test_case("e1 a1. Wc1 Wd1."; "two handed")]
+    #[test_case("e1. a1 Wb1. b1 Wc1. c1 Wd1.  Wc1. "; "rook slide")]
     fn test_castle_queen_side(moves: &str) {
         let mut engine = GameEngine::from_fen(
             "r1bqkbnr/ppp3pp/2n1pp2/3p4/3P1B2/2NQ4/PPP1PPPP/R3KBNR w KQkq - 0 1",
@@ -385,7 +392,7 @@ mod tests {
         let mut engine =
             GameEngine::from_fen("r1bqkbnr/pPpppppp/2n5/8/8/8/PP1PPPPP/RNBQKBNR w KQkq - 0 1");
 
-        execute_script(&mut engine, "b7b8.");
+        execute_script(&mut engine, "b7 Wb8.");
         assert_piece(&engine, "b8", Role::Queen, Color::White);
         assert_empty(&engine, "b7");
     }
@@ -395,7 +402,7 @@ mod tests {
         let mut engine =
             GameEngine::from_fen("r1bqkbnr/pPpppppp/2n5/8/8/8/PP1PPPPP/RNBQKBNR w KQkq - 0 1");
 
-        execute_script(&mut engine, "a8b7.  a8.");
+        execute_script(&mut engine, "a8 b7.  Wa8.");
         assert_piece(&engine, "a8", Role::Queen, Color::White);
         assert_empty(&engine, "b7");
     }
@@ -439,7 +446,7 @@ mod tests {
         let mut engine =
             GameEngine::from_fen("Q2qkbnr/p1pppppp/b1n5/8/8/8/PP1PPPPP/RNBQKBNR w KQk - 0 1");
 
-        execute_script(&mut engine, "a8. d8. d8.");
+        execute_script(&mut engine, "a8. d8. Wd8.");
 
         assert_piece(&engine, "c6", Role::Knight, Color::Black);
         assert_piece(&engine, "d8", Role::Queen, Color::White);
