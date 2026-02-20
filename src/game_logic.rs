@@ -194,7 +194,11 @@ mod tests {
 
     /// Helper to execute a script against an engine.
     fn execute_script(engine: &mut GameEngine, script: &str) {
-        let mut sensor = ScriptedSensor::from_bitboard(engine.last_bitboard);
+        let board = engine.position.board();
+        let mut sensor = ScriptedSensor::from_bitboards(
+            board.by_color(Color::White),
+            board.by_color(Color::Black),
+        );
         sensor
             .push_script(script)
             .expect("test script should be valid");

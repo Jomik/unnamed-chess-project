@@ -57,7 +57,11 @@ pub fn run_interactive_terminal() {
                     match fen_str.parse::<Fen>() {
                         Ok(fen) => {
                             if let Ok(chess) = fen.into_position::<Chess>(CastlingMode::Standard) {
-                                sensor.load_bitboard(chess.board().occupied());
+                                let board = chess.board();
+                                sensor.load_bitboards(
+                                    board.by_color(Color::White),
+                                    board.by_color(Color::Black),
+                                );
                                 engine = GameEngine::from_position(chess);
                                 last_state = engine.tick(sensor.read_positions());
                                 clear_screen();
