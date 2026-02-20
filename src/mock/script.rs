@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use shakmaty::{Bitboard, Chess, Color, Position, Square};
+use shakmaty::{ByColor, Bitboard, Chess, Color, Position, Square};
 use thiserror::Error;
 
 /// Error when parsing or executing a board script.
@@ -20,8 +20,7 @@ pub enum ParseError {
 /// New script can be appended at any time for interactive use.
 #[derive(Debug, Clone)]
 pub struct ScriptedSensor {
-    white_bb: Bitboard,
-    black_bb: Bitboard,
+    positions: ByColor<Bitboard>,
     pending_batches: VecDeque<Vec<BatchEntry>>,
 }
 
@@ -40,10 +39,9 @@ impl ScriptedSensor {
     }
 
     /// Create from separate white and black bitboards.
-    pub fn from_bitboards(white_bb: Bitboard, black_bb: Bitboard) -> Self {
+    pub fn from_bitboards(white: Bitboard, black: Bitboard) -> Self {
         Self {
-            white_bb,
-            black_bb,
+            positions: ByColor { white, black },
             pending_batches: VecDeque::new(),
         }
     }
@@ -51,25 +49,18 @@ impl ScriptedSensor {
     /// Combined occupancy of both colors.
     #[inline]
     pub fn read_positions(&self) -> Bitboard {
-        self.white_bb | self.black_bb
+        self.positions.white | self.positions.black
     }
 
-    /// White piece positions.
+    /// Per-color piece positions.
     #[inline]
-    pub fn white_bb(&self) -> Bitboard {
-        self.white_bb
-    }
-
-    /// Black piece positions.
-    #[inline]
-    pub fn black_bb(&self) -> Bitboard {
-        self.black_bb
+    pub fn positions(&self) -> ByColor<Bitboard> {
+        self.positions
     }
 
     /// Load separate white and black bitboards directly (e.g. when loading a FEN position).
-    pub fn load_bitboards(&mut self, white_bb: Bitboard, black_bb: Bitboard) {
-        self.white_bb = white_bb;
-        self.black_bb = black_bb;
+    pub fn load_bitboards(&mut self, white: Bitboard, black: Bitboard) {
+        self.positions = ByColor { white, black };
         self.pending_batches.clear();
     }
 
@@ -104,7 +95,7 @@ impl ScriptedSensor {
         for (square, color) in batch {
             self.toggle_square(square, color)?;
         }
-        Ok(Some(self.white_bb | self.black_bb))
+        Ok(Some(self.positions.white | self.positions.black))
     }
 
     /// Execute all pending batches, calling the provided callback for each.
@@ -120,21 +111,17 @@ impl ScriptedSensor {
 
     /// Toggle a square in the appropriate per-color bitboard.
     ///
-    /// If the square is occupied, the color is inferred from the bitboards and
-    /// the `color` argument is ignored. If the square is empty, `color` must be
-    /// `Some`; `None` returns [`ParseError::MissingColor`].
+    /// If the square is occupied, the color is inferred and `color` is ignored.
+    /// If the square is empty, `color` must be `Some`; `None` returns [`ParseError::MissingColor`].
     fn toggle_square(&mut self, square: Square, color: Option<Color>) -> Result<(), ParseError> {
-        if self.white_bb.contains(square) {
-            self.white_bb.toggle(square);
-        } else if self.black_bb.contains(square) {
-            self.black_bb.toggle(square);
+        let color = if self.positions.white.contains(square) {
+            Color::White
+        } else if self.positions.black.contains(square) {
+            Color::Black
         } else {
-            match color {
-                Some(Color::White) => self.white_bb.toggle(square),
-                Some(Color::Black) => self.black_bb.toggle(square),
-                None => return Err(ParseError::MissingColor(square.to_string())),
-            }
-        }
+            color.ok_or_else(|| ParseError::MissingColor(square.to_string()))?
+        };
+        self.positions[color].toggle(square);
         Ok(())
     }
 }
@@ -235,8 +222,8 @@ mod tests {
         let black = Bitboard::from_rank(shakmaty::Rank::Seventh)
             | Bitboard::from_rank(shakmaty::Rank::Eighth);
         let sensor = ScriptedSensor::from_bitboards(white, black);
-        assert_eq!(sensor.white_bb(), white);
-        assert_eq!(sensor.black_bb(), black);
+        assert_eq!(sensor.positions().white, white);
+        assert_eq!(sensor.positions().black, black);
         assert_eq!(sensor.read_positions(), white | black);
     }
 
@@ -249,8 +236,8 @@ mod tests {
         sensor.push_script("e2.").unwrap();
         sensor.tick().unwrap();
 
-        assert!(!sensor.white_bb().contains(Square::E2));
-        assert_eq!(sensor.black_bb(), black);
+        assert!(!sensor.positions().white.contains(Square::E2));
+        assert_eq!(sensor.positions().black, black);
     }
 
     #[test]
@@ -262,8 +249,8 @@ mod tests {
         sensor.push_script("e7.").unwrap();
         sensor.tick().unwrap();
 
-        assert!(!sensor.black_bb().contains(Square::E7));
-        assert_eq!(sensor.white_bb(), white);
+        assert!(!sensor.positions().black.contains(Square::E7));
+        assert_eq!(sensor.positions().white, white);
     }
 
     #[test]
@@ -275,7 +262,7 @@ mod tests {
         sensor.push_script("We4.").unwrap();
         sensor.tick().unwrap();
 
-        assert!(sensor.white_bb().contains(Square::E4));
+        assert!(sensor.positions().white.contains(Square::E4));
     }
 
     #[test]
@@ -295,8 +282,8 @@ mod tests {
         let white = Bitboard::from_rank(shakmaty::Rank::Third);
         let black = Bitboard::from_rank(shakmaty::Rank::Sixth);
         sensor.load_bitboards(white, black);
-        assert_eq!(sensor.white_bb(), white);
-        assert_eq!(sensor.black_bb(), black);
+        assert_eq!(sensor.positions().white, white);
+        assert_eq!(sensor.positions().black, black);
         assert_eq!(sensor.read_positions(), white | black);
     }
 
@@ -305,7 +292,7 @@ mod tests {
         let chess = Chess::default();
         let board = chess.board();
         let sensor = ScriptedSensor::new();
-        assert_eq!(sensor.white_bb(), board.by_color(Color::White));
-        assert_eq!(sensor.black_bb(), board.by_color(Color::Black));
+        assert_eq!(sensor.positions().white, board.by_color(Color::White));
+        assert_eq!(sensor.positions().black, board.by_color(Color::Black));
     }
 }

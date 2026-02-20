@@ -12,8 +12,8 @@ fn main() {
     log::info!("System initialized, starting main loop");
     loop {
         match sensor.read_positions() {
-            Ok(bb) => {
-                engine.tick(bb);
+            Ok(positions) => {
+                engine.tick(positions.white | positions.black);
             }
             Err(e) => {
                 log::warn!("Sensor read error: {}", e);
