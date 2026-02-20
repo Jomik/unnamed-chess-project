@@ -1,4 +1,4 @@
-use shakmaty::{ByColor, Bitboard};
+use shakmaty::{Bitboard, ByColor};
 
 /// Error types for ESP32 sensor operations
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

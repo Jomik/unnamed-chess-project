@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use shakmaty::{ByColor, Bitboard, Chess, Color, Position, Square};
+use shakmaty::{Bitboard, ByColor, Chess, Color, Position, Square};
 use thiserror::Error;
 
 /// Error when parsing or executing a board script.
@@ -295,8 +295,7 @@ mod tests {
 
     #[test]
     fn test_tick_error_on_placement_without_color() {
-        let mut sensor =
-            ScriptedSensor::from_bitboards(Bitboard::EMPTY, Bitboard::EMPTY).unwrap();
+        let mut sensor = ScriptedSensor::from_bitboards(Bitboard::EMPTY, Bitboard::EMPTY).unwrap();
         sensor.push_script("e4.").unwrap();
         assert_eq!(
             sensor.tick(),
