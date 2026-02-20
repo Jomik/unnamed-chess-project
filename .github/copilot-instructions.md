@@ -18,7 +18,7 @@ src/
   feedback.rs      — BoardFeedback: maps board state → per-square LED instructions
   esp32/           — Hardware implementation (only compiled for target_os = "espidf")
     mod.rs
-    sensor.rs      — Esp32PieceSensor: reads 74HC165 shift registers (TODO: GPIO not yet implemented)
+    sensor.rs      — Esp32PieceSensor: reads DRV5055A3QDBZR sensors via ADC + mux (TODO: not yet implemented)
   mock/            — Development/test implementation (compiled when NOT espidf)
     mod.rs
     script.rs      — ScriptedSensor: BoardScript-driven mock sensor for tests
@@ -51,8 +51,8 @@ Use `#[cfg(target_os = "espidf")]` / `#[cfg(not(target_os = "espidf"))]` for tar
 ```
 Physical sensors
       │
-      ▼  Bitboard (u64, one bit per square, all colors combined)
-GameEngine::tick(current_bb)
+      ▼  ByColor<Bitboard> (white and black bitboards)
+GameEngine::tick(positions.white | positions.black)
       │
       ├─ process_moves()  → advances Chess position when a legal move is detected
       │
@@ -62,7 +62,7 @@ GameEngine::tick(current_bb)
         compute_feedback(&state)  → BoardFeedback (per-square LED instructions)
 ```
 
-- **`Bitboard`** (from `shakmaty`) — 64-bit set of occupied squares. The sensor returns **one combined bitboard** for all pieces (not per-color).
+- **`ByColor<Bitboard>`** (from `shakmaty`) — pair of 64-bit bitboards, one per color (`.white`, `.black`). Both sensors return this type; `GameEngine::tick()` receives the combined `positions.white | positions.black`.
 - **`Chess`** (from `shakmaty`) — Maintains logical game state: piece types, turn, castling rights, en passant.
 - **`GameEngine`** — Bridges physical sensor readings (`Bitboard`) and logical chess state (`Chess`). Lives in `src/game_logic.rs`.
 - **`BoardFeedback`** — Maps squares to `SquareFeedback` variants (Origin, Destination, Capture, Check, Checker). Consumed by LED drivers or terminal rendering.
@@ -79,11 +79,11 @@ GameEngine::tick(current_bb)
 ## Hardware Architecture
 
 - **MCU**: ESP32 (Xtensa LX6, `xtensa-esp32-espidf` target)
-- **Sensors**: 64× TI DRV5032FB digital Hall-effect sensors arranged in an 8×8 grid
-  - Output is active LOW: LOW = magnet (piece) present, HIGH = empty
-  - 8 sensors per 74HC165 8-bit parallel-in/serial-out shift register
-- **Shift registers**: 8× 74HC165 daisy-chained; 3 GPIO pins required (CLK, PL/LATCH, Q7/DATA)
-- **Current status**: `Esp32PieceSensor::from()` and `read_positions()` are stubbed with `todo!()` — GPIO wiring not yet implemented
+- **Sensors**: 64× TI DRV5055A3QDBZR analog ratiometric Hall-effect sensors arranged in an 8×8 grid
+  - Scanned via analog multiplexers and the ESP32 ADC
+  - Output > VCC/2 = south pole (white piece), output < VCC/2 = north pole (black piece), ≈ VCC/2 = empty
+  - This ADC threshold comparison is what enables per-color detection
+- **Current status**: `Esp32PieceSensor::from()` and `read_positions()` are stubbed with `todo!()` — ADC and multiplexer wiring not yet implemented
 
 ---
 
@@ -92,15 +92,23 @@ GameEngine::tick(current_bb)
 `ScriptedSensor` in `src/mock/script.rs` accepts a mini-language for driving sensor state:
 
 - Squares are two characters: `e2`, `a1`, `h8`
+- An optional `W` or `B` prefix specifies piece color: `We4`, `Be5`
+  - Color prefix is **required** when placing a piece on an empty square
+  - Omitting it on an occupied square infers the color from current state (for lifting)
 - Squares in the same group are toggled atomically (same tick)
 - A period `.` flushes the current group and queues a tick
+- `drain()` and `tick()` now return `Result` — `ParseError::MissingColor` fires if a piece is placed without a color prefix
 
 Examples:
 ```
-"e2e4."     → toggle e2 & e4 together, then tick
-"e2.  e4."  → toggle e2, tick, toggle e4, tick
-"e2. e4."   → same (spaces ignored within a group)
+"e2 We4."     → lift e2, place white on e4, then tick
+"e2.  We4."   → lift e2, tick, place white on e4, tick
+"e7 Be5. g1 Wf3."  → two moves in sequence
 ```
+
+`ScriptedSensor` construction also changed:
+- `ScriptedSensor::from_bitboards(white, black)` returns `Result` (errors on overlapping squares)
+- `load_bitboards(white, black)` replaces the old `load_bitboard`
 
 This format is used extensively in `src/game_logic.rs` tests via `execute_script()`.
 
@@ -181,5 +189,5 @@ See `.github/instructions/rust.instructions.md` for full Rust conventions. Key p
 1. **Running `cargo test` without a target** will attempt an ESP-IDF build and fail outside an ESP environment. Always use `--target x86_64-unknown-linux-gnu` for tests.
 2. **Clippy is strict**: `-D warnings` means any clippy warning fails CI. Run clippy locally before pushing.
 3. **The `esp32` module does not compile on host** and vice versa for `mock`. Don't mix imports across the boundary.
-4. **`Esp32PieceSensor`** methods panic with `todo!()` — this is intentional (hardware not yet wired). Do not remove the `todo!` without implementing the GPIO logic.
+4. **`Esp32PieceSensor`** methods panic with `todo!()` — this is intentional (ADC/multiplexer hardware not yet wired). Do not remove the `todo!` without implementing that logic.
 5. **Promotions are forced to Queen** — when implementing move handling, always filter out non-Queen promotions (see `game_logic.rs:process_moves`).
