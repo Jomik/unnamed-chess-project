@@ -1,0 +1,46 @@
+name: "Copilot Setup Steps"
+
+# Run when this file changes (for validation) or on demand.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # Job name must be exactly `copilot-setup-steps` to be picked up by Copilot.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install stable Rust toolchain (host) + the Xtensa ESP32 toolchain
+      # (cargo +esp) so the agent can build and test both targets without
+      # having to discover or install toolchains itself.
+      - name: Setup Rust (stable + ESP32 Xtensa toolchain)
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          default: true
+          buildtargets: esp32
+          ldproxy: true
+
+      # Pre-populate the Cargo registry and build cache so the agent's
+      # first `cargo build` / `cargo test` is fast.
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      # Warm the host-target build cache.
+      - name: Build (host)
+        run: cargo build --target x86_64-unknown-linux-gnu
+
+      # Warm the ESP32 build cache.
+      - name: Build (ESP32)
+        run: cargo +esp build --release --target xtensa-esp32-espidf
