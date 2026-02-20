@@ -90,11 +90,11 @@ pub fn run_interactive_terminal() {
             "q" => break,
             _ => {
                 // Treat input as BoardScript
-                match sensor.push_script(&input) {
+                let result = sensor
+                    .push_script(&input)
+                    .and_then(|()| sensor.drain(|bb| { last_state = engine.tick(bb); }));
+                match result {
                     Ok(()) => {
-                        sensor.drain(|bb| {
-                            last_state = engine.tick(bb);
-                        });
                         clear_screen();
                         draw_interface(&sensor, &engine, &last_state);
                     }

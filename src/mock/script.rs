@@ -3,10 +3,16 @@ use std::collections::VecDeque;
 use shakmaty::{Bitboard, Chess, Color, Position, Square};
 use thiserror::Error;
 
-/// Error when parsing a board script.
+/// Error when parsing or executing a board script.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
-#[error("invalid square notation: '{0}'")]
-pub struct ParseError(String);
+pub enum ParseError {
+    /// A square token could not be parsed.
+    #[error("invalid square notation: '{0}'")]
+    InvalidSquare(String),
+    /// A piece was placed on an empty square without an explicit color prefix.
+    #[error("{0}: missing color for piece placement")]
+    MissingColor(String),
+}
 
 /// A scriptable mock sensor that processes BoardScript format.
 ///
@@ -16,7 +22,7 @@ pub struct ParseError(String);
 pub struct ScriptedSensor {
     white_bb: Bitboard,
     black_bb: Bitboard,
-    pending_batches: VecDeque<Vec<Square>>,
+    pending_batches: VecDeque<Vec<BatchEntry>>,
 }
 
 impl Default for ScriptedSensor {
@@ -31,11 +37,6 @@ impl ScriptedSensor {
         let chess = Chess::default();
         let board = chess.board();
         Self::from_bitboards(board.by_color(Color::White), board.by_color(Color::Black))
-    }
-
-    /// Create from a combined bitboard (color information unknown; all squares assigned to white).
-    pub fn from_bitboard(bitboard: Bitboard) -> Self {
-        Self::from_bitboards(bitboard, Bitboard::EMPTY)
     }
 
     /// Create from separate white and black bitboards.
@@ -65,11 +66,6 @@ impl ScriptedSensor {
         self.black_bb
     }
 
-    /// Load a new combined bitboard (color information unknown; all squares assigned to white).
-    pub fn load_bitboard(&mut self, bitboard: Bitboard) {
-        self.load_bitboards(bitboard, Bitboard::EMPTY);
-    }
-
     /// Load separate white and black bitboards directly (e.g. when loading a FEN position).
     pub fn load_bitboards(&mut self, white_bb: Bitboard, black_bb: Bitboard) {
         self.white_bb = white_bb;
@@ -81,13 +77,16 @@ impl ScriptedSensor {
     ///
     /// Format:
     /// - Squares are 2 characters (e.g., "e2", "a1")
+    /// - An optional `W` or `B` prefix specifies the piece color (e.g., "We4", "Be5")
     /// - Spaces separate squares in the same batch
     /// - Periods (". ") trigger a tick
     ///
+    /// A color prefix is required when placing a piece on an empty square;
+    /// omitting it for an occupied square infers the color from the current state.
+    ///
     /// Examples:
-    /// - `"e2e4."` - Toggle e2 & e4 together, then tick
-    /// - `"e2 e4."` - Same (explicit space)
-    /// - `"e2.  e4."` - Toggle e2, tick, toggle e4, tick
+    /// - `"e2 We4."` - Lift e2, place white on e4, then tick
+    /// - `"e2.  We4."` - Lift e2, tick, place white on e4, tick
     pub fn push_script(&mut self, script: &str) -> Result<(), ParseError> {
         let batches = parse_script(script)?;
         self.pending_batches.extend(batches);
@@ -95,45 +94,57 @@ impl ScriptedSensor {
     }
 
     /// Execute next pending batch, returning new combined occupancy.
-    /// Returns None if no pending batches.
-    pub fn tick(&mut self) -> Option<Bitboard> {
-        let batch = self.pending_batches.pop_front()?;
-        for square in batch {
-            self.toggle_square(square);
+    ///
+    /// Returns `Ok(None)` if no pending batches remain.
+    /// Returns `Err` if a placement is attempted on an empty square without a color.
+    pub fn tick(&mut self) -> Result<Option<Bitboard>, ParseError> {
+        let Some(batch) = self.pending_batches.pop_front() else {
+            return Ok(None);
+        };
+        for (square, color) in batch {
+            self.toggle_square(square, color)?;
         }
-        Some(self.white_bb | self.black_bb)
+        Ok(Some(self.white_bb | self.black_bb))
     }
 
     /// Execute all pending batches, calling the provided callback for each.
-    pub fn drain<F>(&mut self, mut on_tick: F)
+    pub fn drain<F>(&mut self, mut on_tick: F) -> Result<(), ParseError>
     where
         F: FnMut(Bitboard),
     {
-        while let Some(bb) = self.tick() {
+        while let Some(bb) = self.tick()? {
             on_tick(bb);
         }
+        Ok(())
     }
 
     /// Toggle a square in the appropriate per-color bitboard.
     ///
-    /// Removes from whichever color currently occupies the square.
-    /// If the square is unoccupied (adding a piece without known color),
-    /// it is added to `white_bb` as a fallback.
-    fn toggle_square(&mut self, square: Square) {
+    /// If the square is occupied, the color is inferred from the bitboards and
+    /// the `color` argument is ignored. If the square is empty, `color` must be
+    /// `Some`; `None` returns [`ParseError::MissingColor`].
+    fn toggle_square(&mut self, square: Square, color: Option<Color>) -> Result<(), ParseError> {
         if self.white_bb.contains(square) {
             self.white_bb.toggle(square);
         } else if self.black_bb.contains(square) {
             self.black_bb.toggle(square);
         } else {
-            // Piece placed with no known color; assign to white as fallback.
-            self.white_bb.toggle(square);
+            match color {
+                Some(Color::White) => self.white_bb.toggle(square),
+                Some(Color::Black) => self.black_bb.toggle(square),
+                None => return Err(ParseError::MissingColor(square.to_string())),
+            }
         }
+        Ok(())
     }
 }
 
-/// Parse a BoardScript string into batches of squares to toggle.
-fn parse_script(script: &str) -> Result<Vec<Vec<Square>>, ParseError> {
-    let mut batches: Vec<Vec<Square>> = vec![Vec::new()];
+/// A parsed batch entry: a square to toggle and an optional color prefix.
+type BatchEntry = (Square, Option<Color>);
+
+/// Parse a BoardScript string into batches of `(Square, Option<Color>)` to toggle.
+fn parse_script(script: &str) -> Result<Vec<Vec<BatchEntry>>, ParseError> {
+    let mut batches: Vec<Vec<BatchEntry>> = vec![Vec::new()];
     let mut current_token = String::new();
 
     for ch in script.chars() {
@@ -148,8 +159,12 @@ fn parse_script(script: &str) -> Result<Vec<Vec<Square>>, ParseError> {
             _ => {
                 current_token.push(ch);
 
-                // Squares are exactly 2 characters (e.g., "e2", "a1")
-                if current_token.len() == 2 {
+                // Tokens are 2 chars for bare squares (e.g. "e2") or 3 chars
+                // when prefixed with a color ('W' or 'B', e.g. "We4").
+                let has_color_prefix =
+                    matches!(current_token.chars().next(), Some('W') | Some('B'));
+                let expected_len = if has_color_prefix { 3 } else { 2 };
+                if current_token.len() == expected_len {
                     flush_token(&mut current_token, &mut batches)?;
                 }
             }
@@ -164,17 +179,21 @@ fn parse_script(script: &str) -> Result<Vec<Vec<Square>>, ParseError> {
     Ok(batches)
 }
 
-/// Add current token to the last batch and clear it.
-fn flush_token(token: &mut String, batches: &mut [Vec<Square>]) -> Result<(), ParseError> {
+/// Parse the current token into a [`BatchEntry`] and clear the token.
+fn flush_token(token: &mut String, batches: &mut [Vec<BatchEntry>]) -> Result<(), ParseError> {
     if !token.is_empty() {
-        let square: Square = token
-            .trim()
+        let (color, square_str) = match token.chars().next() {
+            Some('W') => (Some(Color::White), &token[1..]),
+            Some('B') => (Some(Color::Black), &token[1..]),
+            _ => (None, token.as_str()),
+        };
+        let square: Square = square_str
             .parse()
-            .map_err(|_| ParseError(token.clone()))?;
+            .map_err(|_| ParseError::InvalidSquare(token.clone()))?;
         batches
             .last_mut()
             .expect("batches should never be empty")
-            .push(square);
+            .push((square, color));
         token.clear();
     }
     Ok(())
@@ -188,7 +207,7 @@ mod tests {
     fn test_parse_error_invalid_square() {
         let mut sensor = ScriptedSensor::new();
         let result = sensor.push_script("e2.  zz.");
-        assert_eq!(result, Err(ParseError("zz".to_string())));
+        assert_eq!(result, Err(ParseError::InvalidSquare("zz".to_string())));
     }
 
     #[test]
@@ -204,7 +223,7 @@ mod tests {
         assert!(result.is_err());
 
         // The valid batch should still be pending
-        let bb = sensor.tick();
+        let bb = sensor.tick().unwrap();
         assert!(bb.is_some());
         assert_ne!(bb.unwrap(), initial_bb);
     }
@@ -228,7 +247,7 @@ mod tests {
         let mut sensor = ScriptedSensor::from_bitboards(white, black);
 
         sensor.push_script("e2.").unwrap();
-        sensor.tick();
+        sensor.tick().unwrap();
 
         assert!(!sensor.white_bb().contains(Square::E2));
         assert_eq!(sensor.black_bb(), black);
@@ -241,10 +260,33 @@ mod tests {
         let mut sensor = ScriptedSensor::from_bitboards(white, black);
 
         sensor.push_script("e7.").unwrap();
-        sensor.tick();
+        sensor.tick().unwrap();
 
         assert!(!sensor.black_bb().contains(Square::E7));
         assert_eq!(sensor.white_bb(), white);
+    }
+
+    #[test]
+    fn test_toggle_places_with_color_prefix() {
+        let white = Bitboard::from_rank(shakmaty::Rank::Second);
+        let black = Bitboard::from_rank(shakmaty::Rank::Seventh);
+        let mut sensor = ScriptedSensor::from_bitboards(white, black);
+
+        sensor.push_script("We4.").unwrap();
+        sensor.tick().unwrap();
+
+        assert!(sensor.white_bb().contains(Square::E4));
+    }
+
+    #[test]
+    fn test_tick_error_on_placement_without_color() {
+        let mut sensor =
+            ScriptedSensor::from_bitboards(Bitboard::EMPTY, Bitboard::EMPTY);
+        sensor.push_script("e4.").unwrap();
+        assert_eq!(
+            sensor.tick(),
+            Err(ParseError::MissingColor("e4".to_string()))
+        );
     }
 
     #[test]
