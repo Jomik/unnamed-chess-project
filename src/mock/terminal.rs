@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use super::ScriptedSensor;
 use crate::feedback::{self, FeedbackSource, SquareFeedback};
 use crate::game_logic::GameEngine;
+use shakmaty::Piece;
 use shakmaty::{
     Bitboard, CastlingMode, Chess, Color, File, Position, Rank, Role, Square, fen::Fen,
 };
@@ -141,8 +142,8 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
         for file in File::ALL {
             let square = Square::from_coords(file, *rank);
             let cell = match engine.piece_at(square).map(|p| p.color) {
-                Some(Color::White) => "\x1b[97m♟\x1b[0m", // white piece (bright)
-                Some(Color::Black) => "\x1b[90m♟\x1b[0m", // black piece (gray)
+                Some(Color::White) => "\x1b[97m●\x1b[0m", // white piece present (bright)
+                Some(Color::Black) => "\x1b[90m●\x1b[0m", // black piece present (gray)
                 None => "·",
             };
 
@@ -197,7 +198,22 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
     }
 }
 
-/// Get the display symbol for a square on the game state board.
+fn piece_symbol(piece: Piece) -> String {
+    let glyph = match piece.role {
+        Role::Pawn => "♟",
+        Role::Knight => "♞",
+        Role::Bishop => "♝",
+        Role::Rook => "♜",
+        Role::Queen => "♛",
+        Role::King => "♚",
+    };
+    let fg_code = match piece.color {
+        Color::White => 97, // bright white
+        Color::Black => 90, // dark gray
+    };
+    format!("\x1b[{}m{}\x1b[39m", fg_code, glyph) // \x1b[39m resets fg only
+}
+
 fn get_game_state_symbol(
     square: Square,
     sensor_bb: Bitboard,
@@ -205,52 +221,20 @@ fn get_game_state_symbol(
     feedback: &feedback::BoardFeedback,
 ) -> String {
     let has_sensor = sensor_bb.contains(square);
-    let feedback_kind = feedback.get(square);
 
-    // Determine base symbol
-    let base_symbol = if let Some(piece) = engine.piece_at(square) {
-        if has_sensor {
-            // Correct - show piece type
-            match (piece.role, piece.color) {
-                (Role::Pawn, Color::White) => "P",
-                (Role::Knight, Color::White) => "N",
-                (Role::Bishop, Color::White) => "B",
-                (Role::Rook, Color::White) => "R",
-                (Role::Queen, Color::White) => "Q",
-                (Role::King, Color::White) => "K",
-                (Role::Pawn, Color::Black) => "p",
-                (Role::Knight, Color::Black) => "n",
-                (Role::Bishop, Color::Black) => "b",
-                (Role::Rook, Color::Black) => "r",
-                (Role::Queen, Color::Black) => "q",
-                (Role::King, Color::Black) => "k",
-            }
-        } else {
-            "○" // Missing piece
-        }
-    } else if has_sensor {
-        "⚠" // Extra piece
-    } else {
-        "·" // Empty
+    let symbol = match (engine.piece_at(square), has_sensor) {
+        (Some(piece), true) => piece_symbol(piece), // Correct
+        (Some(_), false) => "○".into(),             // Missing
+        (None, true) => "⚠".into(),                 // Extra
+        (None, false) => "·".into(),                // Empty
     };
 
-    // Apply color based on feedback kind
-    match feedback_kind {
-        Some(SquareFeedback::Destination) => {
-            format!("\x1b[44m {} \x1b[0m", base_symbol) // Blue - place here
-        }
-        Some(SquareFeedback::Capture) => {
-            format!("\x1b[41m {} \x1b[0m", base_symbol) // Red - capture here
-        }
-        Some(SquareFeedback::Origin) => {
-            format!("\x1b[42m {} \x1b[0m", base_symbol) // Green - piece origin
-        }
-        Some(SquareFeedback::Check) => {
-            format!("\x1b[45m {} \x1b[0m", base_symbol) // Magenta - king in check
-        }
-        Some(SquareFeedback::Checker) => {
-            format!("\x1b[43m {} \x1b[0m", base_symbol) // Yellow - piece giving check
-        }
-        None => format!(" {} ", base_symbol),
+    match feedback.get(square) {
+        Some(SquareFeedback::Destination) => format!("\x1b[44m {} \x1b[0m", symbol), // Blue
+        Some(SquareFeedback::Capture) => format!("\x1b[41m {} \x1b[0m", symbol),     // Red
+        Some(SquareFeedback::Origin) => format!("\x1b[42m {} \x1b[0m", symbol),      // Green
+        Some(SquareFeedback::Check) => format!("\x1b[45m {} \x1b[0m", symbol),       // Magenta
+        Some(SquareFeedback::Checker) => format!("\x1b[43m {} \x1b[0m", symbol),     // Yellow
+        None => format!(" {} ", symbol),
     }
 }
