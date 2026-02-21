@@ -107,8 +107,6 @@ impl GameEngine {
         let our_current = current[turn];
 
         // Pieces of our color that are newly placed relative to the game's expected state.
-        // Using color-aware placement avoids the need for heuristics like "2 lifted = en passant":
-        // en passant and all other moves are handled naturally by this check.
         let our_placed = our_current & !expected_our;
 
         // Update last_positions
