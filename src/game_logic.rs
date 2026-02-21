@@ -1,6 +1,7 @@
 use crate::feedback::{CheckInfo, FeedbackSource};
 use shakmaty::{
-    Bitboard, Chess, EnPassantMode, Move, MoveList, Piece, Position, Role, Square, fen::Fen,
+    Bitboard, ByColor, Chess, Color, EnPassantMode, Move, MoveList, Piece, Position, Role, Square,
+    fen::Fen,
 };
 
 /// Current game state snapshot for feedback and display
@@ -44,9 +45,8 @@ pub struct GameEngine {
     /// The logical chess position (piece types, turn, castling rights, etc.)
     position: Chess,
 
-    /// Last known physical board state from sensors.
-    /// Tracks actual piece positions independent of game logic.
-    last_bitboard: Bitboard,
+    /// Last known physical board state from sensors, per color.
+    last_positions: ByColor<Bitboard>,
 }
 
 impl GameEngine {
@@ -57,10 +57,14 @@ impl GameEngine {
 
     /// Creates a GameEngine from an existing chess position.
     pub fn from_position(position: Chess) -> Self {
-        let bb = position.board().occupied();
+        let board = position.board();
+        let last_positions = ByColor {
+            white: board.by_color(Color::White),
+            black: board.by_color(Color::Black),
+        };
         Self {
             position,
-            last_bitboard: bb,
+            last_positions,
         }
     }
 
@@ -73,11 +77,12 @@ impl GameEngine {
     /// Process a board state reading
     ///
     /// Tracks changes in piece positions and executes legal moves when pieces are placed.
-    pub fn tick(&mut self, current_bb: Bitboard) -> GameState {
-        self.process_moves(current_bb);
+    pub fn tick(&mut self, current: ByColor<Bitboard>) -> GameState {
+        self.process_moves(current);
 
-        let lifted = self.position.us() & !current_bb;
-        let captured = self.position.them() & !current_bb;
+        let current_combined = current.white | current.black;
+        let lifted = self.position.us() & !current_combined;
+        let captured = self.position.them() & !current_combined;
         GameState {
             legal_moves: self.position.legal_moves(),
             lifted_piece: lifted.single_square(),
@@ -92,25 +97,29 @@ impl GameEngine {
     }
 
     /// Process any completed moves based on sensor state
-    fn process_moves(&mut self, current_bb: Bitboard) {
-        if current_bb == self.last_bitboard {
+    fn process_moves(&mut self, current: ByColor<Bitboard>) {
+        if current == self.last_positions {
             return; // Physical board hasn't changed
         }
 
-        // What changed since last tick?
-        let placed = current_bb & !self.last_bitboard; // Pieces added this tick
-        let expected = self.position.board().occupied();
-        let lifted = expected & !current_bb; // Pieces lifted from actual game
+        let turn = self.position.turn();
+        let expected_our = self.position.board().by_color(turn);
+        let our_current = current[turn];
 
-        // Update last_bitboard
-        self.last_bitboard = current_bb;
+        // Pieces of our color that are newly placed relative to the game's expected state.
+        // Using color-aware placement avoids the need for heuristics like "2 lifted = en passant":
+        // en passant and all other moves are handled naturally by this check.
+        let our_placed = our_current & !expected_our;
 
-        // Wait until pieces are placed before processing moves.
-        // This allows lifting pieces without triggering move execution.
-        // Exception: If exactly 2 pieces are lifted, process anyway as this could be en passant.
-        if placed.is_empty() && lifted.count() != 2 {
+        // Update last_positions
+        self.last_positions = current;
+
+        // Wait until our piece is placed before processing moves.
+        if our_placed.is_empty() {
             return;
         }
+
+        let current_combined = current.white | current.black;
 
         // Find a legal move that results in this physical bitboard state
         for mv in self.position.legal_moves() {
@@ -119,17 +128,16 @@ impl GameEngine {
                 continue;
             }
 
-            // For normal captures, verify the piece was placed on the capture square.
-            // En passant is excluded because the destination differs from the captured pawn's square,
-            // and its unique board state is already validated by the bitboard check below.
-            if mv.is_capture() && Some(mv.to()) != placed.first() && !mv.is_en_passant() {
+            // For captures, verify the piece was placed on the capture square.
+            // This avoids ambiguity when multiple captures are legal.
+            if mv.is_capture() && Some(mv.to()) != our_placed.first() {
                 continue;
             }
 
             let mut after = self.position.clone();
             after.play_unchecked(mv);
 
-            if after.board().occupied() == current_bb {
+            if after.board().occupied() == current_combined {
                 self.position = after;
                 break;
             }
@@ -143,8 +151,11 @@ impl std::fmt::Debug for GameEngine {
         f.debug_struct("GameEngine")
             .field("position", &fen)
             .field(
-                "last_bitboard",
-                &format_args!("{:#018X}", self.last_bitboard),
+                "last_positions",
+                &format_args!(
+                    "white={:#018X}, black={:#018X}",
+                    self.last_positions.white, self.last_positions.black
+                ),
             )
             .finish()
     }
@@ -205,7 +216,7 @@ mod tests {
             .expect("test script should be valid");
         sensor
             .drain(|p| {
-                engine.tick(p.white | p.black);
+                engine.tick(p);
             })
             .expect("test script should produce valid sensor state");
     }
@@ -410,9 +421,9 @@ mod tests {
     #[test]
     fn test_tick_returns_valid_state() {
         let mut engine = GameEngine::new();
-        let bb = engine.last_bitboard;
+        let positions = engine.last_positions;
 
-        let state = engine.tick(bb);
+        let state = engine.tick(positions);
 
         assert_eq!(state.legal_moves().len(), 20);
         assert_eq!(state.lifted_piece(), None);
@@ -421,10 +432,10 @@ mod tests {
     #[test]
     fn test_tick_detects_single_lifted_piece() {
         let mut engine = GameEngine::new();
-        let mut bb = engine.last_bitboard;
-        bb.toggle(Square::E2);
+        let mut positions = engine.last_positions;
+        positions.white.toggle(Square::E2);
 
-        let state = engine.tick(bb);
+        let state = engine.tick(positions);
 
         assert_eq!(state.lifted_piece(), Some(Square::E2));
     }
@@ -432,11 +443,11 @@ mod tests {
     #[test]
     fn test_tick_no_lifted_piece_when_multiple_missing() {
         let mut engine = GameEngine::new();
-        let mut bb = engine.last_bitboard;
-        bb.toggle(Square::E2);
-        bb.toggle(Square::D2);
+        let mut positions = engine.last_positions;
+        positions.white.toggle(Square::E2);
+        positions.white.toggle(Square::D2);
 
-        let state = engine.tick(bb);
+        let state = engine.tick(positions);
 
         assert_eq!(state.lifted_piece(), None);
     }

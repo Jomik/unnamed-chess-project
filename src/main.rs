@@ -13,7 +13,7 @@ fn main() {
     loop {
         match sensor.read_positions() {
             Ok(positions) => {
-                engine.tick(positions.white | positions.black);
+                engine.tick(positions);
             }
             Err(e) => {
                 log::warn!("Sensor read error: {}", e);
