@@ -140,8 +140,13 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
         print!("║ {} ║", rank.char());
         for file in File::ALL {
             let square = Square::from_coords(file, *rank);
-            let has_sensor = sensor_bb.contains(square);
-            print!("{}", if has_sensor { " ♟ " } else { " · " });
+            let cell = match engine.piece_at(square).map(|p| p.color) {
+                Some(Color::White) => "\x1b[97m♟\x1b[0m", // white piece (bright)
+                Some(Color::Black) => "\x1b[90m♟\x1b[0m", // black piece (gray)
+                None => "·",
+            };
+
+            print!(" {} ", cell);
         }
 
         print!(" ║");
