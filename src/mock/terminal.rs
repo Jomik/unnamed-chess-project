@@ -20,7 +20,7 @@ pub fn run_interactive_terminal() {
     let mut sensor = ScriptedSensor::new();
     let mut engine = GameEngine::new();
     let positions = sensor.read_positions();
-    let mut last_state = engine.tick(positions.white | positions.black);
+    let mut last_state = engine.tick(positions);
 
     clear_screen();
     draw_interface(&sensor, &engine, &last_state);
@@ -67,7 +67,7 @@ pub fn run_interactive_terminal() {
                                     .expect("board positions cannot overlap");
                                 engine = GameEngine::from_position(chess);
                                 let positions = sensor.read_positions();
-                                last_state = engine.tick(positions.white | positions.black);
+                                last_state = engine.tick(positions);
                                 clear_screen();
                                 draw_interface(&sensor, &engine, &last_state);
                                 println!("\n✅ Position loaded from FEN");
@@ -83,7 +83,7 @@ pub fn run_interactive_terminal() {
                 sensor = ScriptedSensor::new();
                 engine = GameEngine::new();
                 let positions = sensor.read_positions();
-                last_state = engine.tick(positions.white | positions.black);
+                last_state = engine.tick(positions);
                 clear_screen();
                 draw_interface(&sensor, &engine, &last_state);
                 println!("\n🔄 Reset to initial state");
@@ -97,7 +97,7 @@ pub fn run_interactive_terminal() {
                 // Treat input as BoardScript
                 let result = sensor.push_script(&input).and_then(|()| {
                     sensor.drain(|p| {
-                        last_state = engine.tick(p.white | p.black);
+                        last_state = engine.tick(p);
                     })
                 });
                 match result {
