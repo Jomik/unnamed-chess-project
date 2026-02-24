@@ -30,9 +30,9 @@ pub enum SquareFeedback {
 /// rendering to provide visual cues to the user. This struct represents the mapping from squares
 /// to their feedback (e.g., highlight for move destinations, captures, or origins) and is the
 /// primary interface between the game logic and the hardware/terminal feedback layer.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoardFeedback {
-    squares: Vec<(Square, SquareFeedback)>,
+    squares: [Option<SquareFeedback>; 64],
 }
 
 impl BoardFeedback {
@@ -40,23 +40,31 @@ impl BoardFeedback {
     #[inline]
     pub const fn new() -> Self {
         Self {
-            squares: Vec::new(),
+            squares: [None; 64],
         }
     }
 
-    /// Get all square feedback entries
+    /// Get all square feedback entries as (Square, SquareFeedback) pairs
     #[inline]
-    pub fn squares(&self) -> &[(Square, SquareFeedback)] {
-        &self.squares
+    pub fn squares(&self) -> impl Iterator<Item = (Square, SquareFeedback)> + '_ {
+        self.squares.iter().enumerate().filter_map(|(i, fb)| {
+            fb.map(|f| {
+                // SAFETY: i is always 0..63 from a fixed-size array
+                (Square::new(i as u32), f)
+            })
+        })
     }
 
     /// Get feedback for a specific square, if any
     #[inline]
     pub fn get(&self, square: Square) -> Option<SquareFeedback> {
-        self.squares
-            .iter()
-            .find(|(sq, _)| *sq == square)
-            .map(|(_, feedback)| *feedback)
+        self.squares[square as usize]
+    }
+
+    /// Set feedback for a specific square
+    #[inline]
+    pub fn set(&mut self, square: Square, feedback: SquareFeedback) {
+        self.squares[square as usize] = Some(feedback);
     }
 
     /// Check if any feedback exists
@@ -64,13 +72,13 @@ impl BoardFeedback {
     /// Returns true if there are no feedback squares to display.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.squares.is_empty()
+        self.squares.iter().all(|s| s.is_none())
     }
 }
 
-impl From<Vec<(Square, SquareFeedback)>> for BoardFeedback {
-    fn from(squares: Vec<(Square, SquareFeedback)>) -> Self {
-        Self { squares }
+impl Default for BoardFeedback {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -124,32 +132,28 @@ pub fn compute_feedback(source: &impl FeedbackSource) -> BoardFeedback {
 
 /// Show legal destinations when a piece is lifted
 fn show_destinations_for(legal_moves: &[Move], from: Square) -> BoardFeedback {
-    std::iter::once((from, SquareFeedback::Origin))
-        .chain(
-            legal_moves
-                .iter()
-                .filter(|mv| mv.from() == Some(from))
-                .map(classify_move),
-        )
-        .collect::<Vec<_>>()
-        .into()
+    let mut fb = BoardFeedback::new();
+    fb.set(from, SquareFeedback::Origin);
+    for mv in legal_moves.iter().filter(|mv| mv.from() == Some(from)) {
+        let (sq, kind) = classify_move(mv);
+        fb.set(sq, kind);
+    }
+    fb
 }
 
 /// Show which pieces can capture on the removed opponent piece's square
 fn show_capture_options(legal_moves: &[Move], captured_sq: Square) -> BoardFeedback {
-    legal_moves
+    let mut fb = BoardFeedback::new();
+    for mv in legal_moves
         .iter()
         .filter(|mv| captures_square(mv, captured_sq))
-        .flat_map(|mv| {
-            // Emit both destination and origin for each capturing move
-            std::iter::once((mv.to(), SquareFeedback::Destination))
-                .chain(mv.from().map(|from| (from, SquareFeedback::Origin)))
-        })
-        // Deduplicate
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>()
-        .into()
+    {
+        fb.set(mv.to(), SquareFeedback::Destination);
+        if let Some(from) = mv.from() {
+            fb.set(from, SquareFeedback::Origin);
+        }
+    }
+    fb
 }
 
 /// Show where to place your piece after opponent piece removed and your piece lifted
@@ -158,28 +162,25 @@ fn show_capture_completion(
     from: Square,
     captured_sq: Square,
 ) -> BoardFeedback {
-    std::iter::once((from, SquareFeedback::Origin))
-        .chain(
-            legal_moves
-                .iter()
-                .filter(|mv| mv.from() == Some(from) && captures_square(mv, captured_sq))
-                .map(|mv| (mv.to(), SquareFeedback::Destination)),
-        )
-        .collect::<Vec<_>>()
-        .into()
+    let mut fb = BoardFeedback::new();
+    fb.set(from, SquareFeedback::Origin);
+    for mv in legal_moves
+        .iter()
+        .filter(|mv| mv.from() == Some(from) && captures_square(mv, captured_sq))
+    {
+        fb.set(mv.to(), SquareFeedback::Destination);
+    }
+    fb
 }
 
 /// Show check and checker squares when king is in check
 fn show_check_feedback(check_info: &CheckInfo) -> BoardFeedback {
-    std::iter::once((check_info.king_square, SquareFeedback::Check))
-        .chain(
-            check_info
-                .checkers
-                .into_iter()
-                .map(|sq| (sq, SquareFeedback::Checker)),
-        )
-        .collect::<Vec<_>>()
-        .into()
+    let mut fb = BoardFeedback::new();
+    fb.set(check_info.king_square, SquareFeedback::Check);
+    for sq in check_info.checkers {
+        fb.set(sq, SquareFeedback::Checker);
+    }
+    fb
 }
 
 /// Classify a move as either a capture or regular destination
@@ -291,7 +292,7 @@ mod tests {
 
         let feedback = compute_feedback(&source);
 
-        assert_eq!(feedback.squares().len(), 0);
+        assert_eq!(feedback.squares().count(), 0);
         assert!(feedback.is_empty());
     }
 
