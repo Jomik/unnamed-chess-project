@@ -119,16 +119,19 @@ impl GameEngine {
 
         let current_combined = current.white | current.black;
 
-        // Find a legal move that results in this physical bitboard state
+        // Find a legal move that results in this physical bitboard state.
+        // Pre-filter by destination: skip moves that don't land
+        // on a newly placed square to avoid expensive clone+play.
         for mv in self.position.legal_moves() {
-            // We only allow promotions to Queen to simplify physical interaction (no piece selection mechanism on hardware).
-            if mv.promotion().is_some_and(|role| role != Role::Queen) {
+            // Castling: mv.to() is the rook origin, not king
+            // destination, so skip the destination pre-filter.
+            if !matches!(mv, Move::Castle { .. }) && !our_placed.contains(mv.to()) {
                 continue;
             }
 
-            // For captures, verify the piece was placed on the capture square.
-            // This avoids ambiguity when multiple captures are legal.
-            if mv.is_capture() && Some(mv.to()) != our_placed.first() {
+            // We only allow promotions to Queen to simplify physical
+            // interaction (no piece selection mechanism on hardware).
+            if mv.promotion().is_some_and(|role| role != Role::Queen) {
                 continue;
             }
 
