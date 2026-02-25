@@ -180,7 +180,6 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
             "   Legal destinations: {}",
             feedback
                 .squares()
-                .iter()
                 .filter(|(_, t)| matches!(t, SquareFeedback::Destination | SquareFeedback::Capture))
                 .count()
         );
@@ -191,7 +190,6 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
             "   Legal captors: {}",
             feedback
                 .squares()
-                .iter()
                 .filter(|(_, t)| matches!(t, SquareFeedback::Origin))
                 .count()
         );
