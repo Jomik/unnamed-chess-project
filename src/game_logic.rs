@@ -464,4 +464,129 @@ mod tests {
         assert_piece(&engine, "d8", Role::Queen, Color::White);
         assert_empty(&engine, "a8");
     }
+
+    #[test]
+    fn test_black_simple_pawn_move() {
+        let mut engine = GameEngine::new();
+
+        execute_script(&mut engine, "e2 We4. e7 Be5.");
+
+        assert_piece(&engine, "e5", Role::Pawn, Color::Black);
+        assert_empty(&engine, "e7");
+    }
+
+    #[test]
+    fn test_black_knight_move() {
+        let mut engine = GameEngine::new();
+
+        execute_script(&mut engine, "e2 We4. b8 Bc6.");
+
+        assert_piece(&engine, "c6", Role::Knight, Color::Black);
+        assert_empty(&engine, "b8");
+    }
+
+    #[test]
+    fn test_scholars_mate_is_checkmate() {
+        let mut engine = GameEngine::new();
+        // 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6?? 4.Qxf7#
+        let script = "e2 We4. e7 Be5. f1 Wc4. b8 Bc6. d1 Wh5. g8 Bf6. f7 h5 Wf7.";
+
+        // Use ScriptedSensor directly so we can read final positions
+        let board = engine.position.board();
+        let mut sensor = ScriptedSensor::from_bitboards(
+            board.by_color(Color::White),
+            board.by_color(Color::Black),
+        )
+        .expect("board positions cannot overlap");
+        sensor.push_script(script).expect("valid script");
+        sensor
+            .drain(|p| {
+                engine.tick(p);
+            })
+            .expect("valid sensor state");
+
+        // Tick once more with current positions to get final state
+        let state = engine.tick(sensor.read_positions());
+
+        assert!(state.legal_moves().is_empty(), "should be checkmate");
+        assert!(state.check_info().is_some(), "king should be in check",);
+        assert_piece(&engine, "f7", Role::Queen, Color::White);
+    }
+
+    #[test]
+    fn test_stalemate() {
+        // White: Qb6, Kc6. Black: Ka8. Black to move, no legal
+        // White: Qb6, Kc6. Black: Ka8. Black to move, no legal
+        // moves, not in check = stalemate.
+        let mut engine = GameEngine::from_fen("k7/8/1QK5/8/8/8/8/8 b - - 0 1");
+
+        // Already stalemate — just tick with current positions
+        let board = engine.position.board();
+        let sensor = ScriptedSensor::from_bitboards(
+            board.by_color(Color::White),
+            board.by_color(Color::Black),
+        )
+        .expect("board positions cannot overlap");
+
+        let state = engine.tick(sensor.read_positions());
+
+        assert!(state.legal_moves().is_empty(), "should be stalemate");
+        assert!(
+            state.check_info().is_none(),
+            "should NOT be in check (stalemate, not checkmate)",
+        );
+    }
+
+    #[test_case("e8 Bg8. h8 Bf8."; "king first slow")]
+    #[test_case("e8 h8. Bg8 Bf8."; "two handed")]
+    fn test_black_castle_king_side(moves: &str) {
+        let mut engine = GameEngine::from_fen(
+            "rnbqk2r/pppp1ppp/5n2/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQ1RK1 b kq - 5 4",
+        );
+
+        execute_script(&mut engine, moves);
+
+        assert_piece(&engine, "g8", Role::King, Color::Black);
+        assert_piece(&engine, "f8", Role::Rook, Color::Black);
+        assert_empty(&engine, "e8");
+        assert_empty(&engine, "h8");
+    }
+
+    #[test_case("e8 Bc8. a8 Bd8."; "king first slow")]
+    #[test_case("e8 a8. Bc8 Bd8."; "two handed")]
+    fn test_black_castle_queen_side(moves: &str) {
+        let mut engine = GameEngine::from_fen(
+            "r3kbnr/pppqpppp/2n5/3p1b2/3P1B2/2NQ4/PPP1PPPP/R3KBNR b KQkq - 6 4",
+        );
+
+        execute_script(&mut engine, moves);
+
+        assert_piece(&engine, "c8", Role::King, Color::Black);
+        assert_piece(&engine, "d8", Role::Rook, Color::Black);
+        assert_empty(&engine, "e8");
+        assert_empty(&engine, "a8");
+    }
+
+    #[test]
+    fn test_black_promotion() {
+        let mut engine = GameEngine::from_fen("8/8/8/8/8/8/1p5k/4K3 b - - 0 1");
+
+        execute_script(&mut engine, "b2 Bb1.");
+
+        assert_piece(&engine, "b1", Role::Queen, Color::Black);
+        assert_empty(&engine, "b2");
+    }
+
+    #[test_case("d4. c4. Bc3."; "slow")]
+    #[test_case("d4 c4. Bc3."; "quick")]
+    fn test_black_en_passant(moves: &str) {
+        let mut engine =
+            GameEngine::from_fen("rnbqkbnr/pp1ppppp/8/8/2Pp4/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1");
+
+        execute_script(&mut engine, moves);
+
+        assert_piece(&engine, "c3", Role::Pawn, Color::Black);
+        assert_empty(&engine, "d4");
+        assert_empty(&engine, "c4");
+    }
 }
