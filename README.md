@@ -1,24 +1,72 @@
 # Smart Chess Board
 
-TBD
+The Smart Chess Board is an ESP32-based physical chess board that detects piece positions using Hall-effect sensors and provides visual LED feedback. It integrates the shakmaty chess engine to validate moves and manage game state, enabling a seamless bridge between physical and digital chess.
 
 ## Features
 
-TBD
+- **Piece Detection**: Per-color piece detection using Hall-effect sensors (DRV5055A3QDBZR) in an 8x8 grid.
+- **Legal Move Validation**: Real-time validation of physical chess moves using the `shakmaty` library.
+- **Visual LED Feedback**: Indicators for move destinations, captures, and check alerts.
+- **Interactive Simulator**: A terminal-based simulator for manual testing without physical hardware.
 
-## Setup
+## Repository Layout
 
-### One-time installation (per machine)
-
-```bash
-# Install all tools (Rust, Python, espup, cargo-espflash, ldproxy)
-mise install
-
-mise run setup-esp
+```
+src/
+  main.rs          — Binary entry point (conditional: ESP32 or host mock)
+  lib.rs           — Library root with conditional module registration
+  game_logic.rs    — Core GameEngine: processes sensor bitboards, advances chess position
+  feedback.rs      — BoardFeedback: maps board state → per-square LED instructions
+  esp32/           — Hardware implementation (only compiled for target_os = "espidf")
+    mod.rs
+    sensor.rs      — Esp32PieceSensor: reads DRV5055A3QDBZR sensors via ADC + mux (TODO: not yet implemented)
+  mock/            — Development/test implementation (compiled when NOT espidf)
+    mod.rs
+    script.rs      — ScriptedSensor: BoardScript-driven mock sensor for tests
+    terminal.rs    — Interactive terminal simulator for manual testing
+build.rs           — Runs embuild ESP-IDF setup only when targeting espidf
+.cargo/config.toml — Linker, runner, and env for ESP32 target
+sdkconfig.defaults — ESP-IDF kernel config (stack size, FreeRTOS tick rate)
+rust-toolchain.toml — Pins stable Rust toolchain with rustfmt/clippy/rust-analyzer
+.mise.toml         — Tool versions (rust, espup, cargo-espflash, ldproxy) and task shortcuts
+Cargo.toml         — Dependencies: shakmaty (chess), thiserror (errors), esp-idf-svc (ESP32)
 ```
 
-### Verify setup
+## Building and Testing
+
+### Host (Development and Testing)
+
+Run tests and simulators on a local machine using the x86_64 target.
 
 ```bash
+# Run all tests
+cargo test --target x86_64-unknown-linux-gnu
+
+# Run interactive terminal simulator
+cargo run --target x86_64-unknown-linux-gnu
+
+# Use mise shortcuts
+mise run test
+mise run dev
+```
+
+### ESP32 Firmware
+
+Requires the ESP toolchain setup.
+
+```bash
+# One-time toolchain installation
+mise install && mise run setup-esp
+
+# Build firmware
 mise run build
+
+# Flash to device
+mise run flash
 ```
+
+## Development
+
+The project includes an interactive terminal simulator for manual development testing. You can also define scripted sensor states for automated tests using the BoardScript format.
+
+For detailed documentation on internals and coding conventions, refer to `.github/copilot-instructions.md`.
