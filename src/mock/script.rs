@@ -131,6 +131,15 @@ impl ScriptedSensor {
     }
 }
 
+impl crate::PieceSensor for ScriptedSensor {
+    type Error = std::convert::Infallible;
+
+    #[inline]
+    fn read_positions(&mut self) -> Result<ByColor<Bitboard>, Self::Error> {
+        Ok(self.positions)
+    }
+}
+
 /// Returns `Err(ParseError::OverlappingSquares)` if `white` and `black` share any square.
 fn check_overlap(white: Bitboard, black: Bitboard) -> Result<(), ParseError> {
     let overlap = white & black;
