@@ -29,7 +29,6 @@ src/
 build.rs           — Runs embuild ESP-IDF setup only when targeting espidf
 .cargo/config.toml — Cargo config: default ESP32 target, linker, runner, env
 sdkconfig.defaults — ESP-IDF kernel config (stack size, FreeRTOS tick rate)
-rust-toolchain.toml — Pins stable Rust toolchain with rustfmt/clippy/rust-analyzer
 .mise.toml         — Tool versions (rust, espup, cargo-espflash, ldproxy) and task shortcuts
 Cargo.toml         — Dependencies: shakmaty (chess), thiserror (errors), esp-idf-svc (ESP32)
 ```
