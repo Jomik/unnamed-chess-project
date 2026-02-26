@@ -15,6 +15,22 @@ pub trait PieceSensor {
     fn read_positions(&mut self) -> Result<ByColor<Bitboard>, Self::Error>;
 }
 
+/// Trait for displaying board feedback to the player.
+///
+/// Abstracts over LED hardware (ESP32) and terminal rendering,
+/// providing a uniform interface for the output side of the
+/// game loop. Mirrors [`PieceSensor`] on the input side.
+pub trait BoardDisplay {
+    /// Error type for display update failures.
+    type Error: std::fmt::Debug + std::fmt::Display;
+
+    /// Show the given feedback state on the display.
+    ///
+    /// Implementations map [`feedback::SquareFeedback`] variants
+    /// to hardware-specific output (LED colors, terminal colors, etc.).
+    fn show(&mut self, feedback: &feedback::BoardFeedback) -> Result<(), Self::Error>;
+}
+
 #[cfg(target_os = "espidf")]
 pub mod esp32;
 
