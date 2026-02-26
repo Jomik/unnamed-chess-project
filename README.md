@@ -20,10 +20,12 @@ src/
   esp32/           — Hardware implementation (only compiled for target_os = "espidf")
     mod.rs
     sensor.rs      — Esp32PieceSensor: reads DRV5055A3QDBZR sensors via ADC + mux (TODO: not yet implemented)
+    display.rs     — Esp32LedDisplay: drives WS2812 LEDs for board feedback (TODO: not yet implemented)
   mock/            — Development/test implementation (compiled when NOT espidf)
     mod.rs
     script.rs      — ScriptedSensor: BoardScript-driven mock sensor for tests
     terminal.rs    — Interactive terminal simulator for manual testing
+    display.rs     — TerminalDisplay: ANSI terminal BoardDisplay for development
 build.rs           — Runs embuild ESP-IDF setup only when targeting espidf
 .cargo/config.toml — Linker, runner, and env for ESP32 target
 sdkconfig.defaults — ESP-IDF kernel config (stack size, FreeRTOS tick rate)

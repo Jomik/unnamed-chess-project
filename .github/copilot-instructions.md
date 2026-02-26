@@ -19,10 +19,12 @@ src/
   esp32/           — Hardware implementation (only compiled for target_os = "espidf")
     mod.rs
     sensor.rs      — Esp32PieceSensor: reads DRV5055A3QDBZR sensors via ADC + mux (TODO: not yet implemented)
+    display.rs     — Esp32LedDisplay: drives WS2812 LEDs for board feedback (TODO: not yet implemented)
   mock/            — Development/test implementation (compiled when NOT espidf)
     mod.rs
     script.rs      — ScriptedSensor: BoardScript-driven mock sensor for tests
     terminal.rs    — Interactive terminal simulator for manual testing
+    display.rs     — TerminalDisplay: ANSI terminal BoardDisplay for development
 build.rs           — Runs embuild ESP-IDF setup only when targeting espidf
 .cargo/config.toml — Linker, runner, and env for ESP32 target
 sdkconfig.defaults — ESP-IDF kernel config (stack size, FreeRTOS tick rate)
@@ -60,13 +62,18 @@ GameEngine::tick(positions.white | positions.black)
               │
               ▼
         compute_feedback(&state)  → BoardFeedback (per-square LED instructions)
+              │
+              ▼
+        BoardDisplay::show(&feedback)  → LEDs / terminal output
 ```
 
 - **`ByColor<Bitboard>`** (from `shakmaty`) — pair of 64-bit bitboards, one per color (`.white`, `.black`). Both sensors return this type; `GameEngine::tick()` receives the combined `positions.white | positions.black`.
 - **`Chess`** (from `shakmaty`) — Maintains logical game state: piece types, turn, castling rights, en passant.
+- **`PieceSensor`** — Trait abstracting sensor input. Implemented by `Esp32PieceSensor` (hardware) and `ScriptedSensor` (mock). Lives in `src/lib.rs`.
 - **`GameEngine`** — Bridges physical sensor readings (`Bitboard`) and logical chess state (`Chess`). Lives in `src/game_logic.rs`.
-- **`BoardFeedback`** — Maps squares to `SquareFeedback` variants (Origin, Destination, Capture, Check, Checker). Consumed by LED drivers or terminal rendering.
+- **`BoardFeedback`** — Maps squares to `SquareFeedback` variants (Origin, Destination, Capture, Check, Checker). Consumed by `BoardDisplay` implementations.
 - **`FeedbackSource`** — Trait that `GameState` implements; decouples feedback logic from the engine.
+- **`BoardDisplay`** — Trait abstracting visual output. Implemented by `Esp32LedDisplay` (hardware LEDs) and `TerminalDisplay` (ANSI terminal). Mirrors `PieceSensor` on the input side. Lives in `src/lib.rs`.
 
 ### Important game engine constraints
 
