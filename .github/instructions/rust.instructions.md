@@ -36,29 +36,18 @@ Documentation should be **concise and focused on "what" and "why"**, not tutoria
 
 - Use modules (`mod`) and public interfaces (`pub`) to encapsulate logic.
 - Handle errors properly using `?`, `match`, or `if let`.
-- Use `serde` for serialization and `thiserror` or `anyhow` for custom errors.
+- Use `thiserror` for custom error types (the only error library in this project).
 - Implement traits to abstract services or external dependencies.
-- Structure async code using `async/await` and `tokio` or `async-std`.
 - Prefer enums over flags and states for type safety.
 - Use builders for complex object creation.
 - Split binary and library code (`main.rs` vs `lib.rs`) for testability and reuse.
-- Use `rayon` for data parallelism and CPU-bound tasks.
 - Use iterators instead of index-based loops as they're often faster and safer.
 - Use `&str` instead of `String` for function parameters when you don't need ownership.
 - Prefer borrowing and zero-copy operations to avoid unnecessary allocations.
 
-### Ownership, Borrowing, and Lifetimes
-
-- Prefer borrowing (`&T`) over cloning unless ownership transfer is necessary.
-- Use `&mut T` when you need to modify borrowed data.
-- Explicitly annotate lifetimes when the compiler cannot infer them.
-- Use `Rc<T>` for single-threaded reference counting and `Arc<T>` for thread-safe reference counting.
-- Use `RefCell<T>` for interior mutability in single-threaded contexts and `Mutex<T>` or `RwLock<T>` for multi-threaded contexts.
-
 ## Patterns to Avoid
 
-- Don't use `unwrap()` or `expect()` unless absolutely necessary—prefer proper error handling.
-- Avoid panics in library code—return `Result` instead.
+- No `unwrap()` in production code — use `?` or `expect()` only where logically impossible to fail, with a clear message.
 - Don't rely on global mutable state—use dependency injection or thread-safe containers.
 - Avoid deeply nested logic—refactor with functions or combinators.
 - Don't ignore warnings—treat them as errors during CI.
@@ -77,8 +66,8 @@ Documentation should be **concise and focused on "what" and "why"**, not tutoria
 ## Error Handling
 
 - Use `Result<T, E>` for recoverable errors and `panic!` only for unrecoverable errors.
-- Prefer `?` operator over `unwrap()` or `expect()` for error propagation.
-- Create custom error types using `thiserror` or implement `std::error::Error`.
+- No `unwrap()` in production code — use `?` or `expect()` only where logically impossible to fail, with a clear message.
+- Create custom error types using `thiserror`.
 - Use `Option<T>` for values that may or may not exist.
 - Provide meaningful error messages and context.
 - Error types should be meaningful and well-behaved (implement standard traits like `Debug`, `Display`, `Error`).
@@ -93,8 +82,6 @@ Eagerly implement common traits where appropriate:
 
 - `Copy`, `Clone`, `Eq`, `PartialEq`, `Ord`, `PartialOrd`, `Hash`, `Debug`, `Display`, `Default`
 - Use standard conversion traits: `From`, `AsRef`, `AsMut`
-- Collections should implement `FromIterator` and `Extend`
-- Note: `Send` and `Sync` are auto-implemented by the compiler when safe; avoid manual implementation unless using `unsafe` code
 
 ### Type Safety and Predictability
 
@@ -106,7 +93,6 @@ Eagerly implement common traits where appropriate:
 
 ### Future Proofing
 
-- Use sealed traits to protect against downstream implementations
 - Structs should have private fields
 - Functions should validate their arguments
 - All public types must implement `Debug`
@@ -183,12 +169,10 @@ pub struct Esp32PieceSensor { ... }
 
 ## Project Organization
 
-- Use semantic versioning in `Cargo.toml`.
-- Include comprehensive metadata: `description`, `authors`, `edition`.
 - Use feature flags for optional functionality.
 - Organize code into modules using `mod.rs` or named files.
-- Keep `main.rs` or `lib.rs` minimal - move logic to modules.
-- **This is not published to crates.io** - omit `license`, `repository`, `keywords`, `categories`.
+- Keep `main.rs` or `lib.rs` minimal — move logic to modules.
+- **This is not published to crates.io** — omit `license`, `repository`, `keywords`, `categories` from `Cargo.toml`.
 
 ## Quality Checklist
 

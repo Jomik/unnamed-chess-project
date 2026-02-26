@@ -29,7 +29,6 @@ build.rs           — Runs embuild ESP-IDF setup only when targeting espidf
 .cargo/config.toml — Cargo config: default ESP32 target, linker, runner, env
 sdkconfig.defaults — ESP-IDF kernel config (stack size, FreeRTOS tick rate)
 .mise.toml         — Tool versions (rust, espup, cargo-espflash, ldproxy) and task shortcuts
-.mise.toml         — Tool versions (rust, espup, cargo-espflash, ldproxy) and task shortcuts
 Cargo.toml         — Dependencies: shakmaty (chess), thiserror (errors), esp-idf-svc (ESP32)
 ```
 
@@ -177,14 +176,7 @@ CI runs two job groups. ESP checks wait for host checks to pass first.
 
 ## Coding Conventions
 
-See `.github/instructions/rust.instructions.md` for full Rust conventions. Key points:
-
-- **Error handling**: Use `Result<T, E>` with meaningful error types via `thiserror`. Never use `()` as an error type.
-- **No `unwrap()`** in production code — use `?` or `expect()` only where logically impossible to fail, with a clear message.
-- **Documentation**: Brief `///` on all public items. Focus on "what" and "why", not tutorials. Hardware-specific details (pins, timing) belong in doc comments.
-- **Traits**: Implement `Debug` on all public types at minimum.
-- **Formatting**: `cargo fmt` enforced. Lines ≤ 100 characters.
-- **Testing**: Unit tests in `#[cfg(test)]` modules alongside source. Use `test_case` for parametric tests.
+See `.github/instructions/rust.instructions.md` for full Rust coding conventions.
 
 ---
 
