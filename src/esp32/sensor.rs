@@ -15,7 +15,6 @@ pub enum SensorError {
 /// output > VCC/2 = white piece (south pole), output < VCC/2 = black piece (north pole).
 #[derive(Debug)]
 pub struct Esp32PieceSensor {
-    positions: ByColor<Bitboard>,
     // TODO: Add ADC and analog multiplexer peripherals
 }
 
