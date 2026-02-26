@@ -28,7 +28,7 @@ src/
 build.rs           — Runs embuild ESP-IDF setup only when targeting espidf
 .cargo/config.toml — Cargo config: default ESP32 target, linker, runner, env
 sdkconfig.defaults — ESP-IDF kernel config (stack size, FreeRTOS tick rate)
-rust-toolchain.toml — Pins stable Rust toolchain with rustfmt/clippy/rust-analyzer
+.mise.toml         — Tool versions (rust, espup, cargo-espflash, ldproxy) and task shortcuts
 .mise.toml         — Tool versions (rust, espup, cargo-espflash, ldproxy) and task shortcuts
 Cargo.toml         — Dependencies: shakmaty (chess), thiserror (errors), esp-idf-svc (ESP32)
 ```
@@ -154,18 +154,23 @@ cargo +esp clippy --all-targets --all-features --workspace -- -D warnings
 
 ## CI Pipeline (`.github/workflows/rust_ci.yml`)
 
-The CI matrix runs all of these in parallel:
+CI runs two job groups. ESP checks wait for host checks to pass first.
+
+### Host Checks (`dtolnay/rust-toolchain@stable`)
+
+| Step | Command |
+|---|---|
+| Format check | `cargo fmt --all -- --check --color always` |
+| Clippy (host) | `cargo clippy --all-targets --all-features --workspace --target x86_64-unknown-linux-gnu -- -D warnings` |
+| Host build | `cargo build --target x86_64-unknown-linux-gnu` |
+| Host tests | `cargo test --target x86_64-unknown-linux-gnu` |
+
+### ESP32 Checks (`esp-rs/xtensa-toolchain@v1.6`)
 
 | Step | Command |
 |---|---|
 | ESP32 build | `cargo +esp build --release --target xtensa-esp32-espidf` |
-| Format check | `cargo fmt --all -- --check --color always` |
 | Clippy (ESP32) | `cargo +esp clippy --all-targets --all-features --workspace -- -D warnings` |
-| Host build | `cargo build --target x86_64-unknown-linux-gnu` |
-| Host tests | `cargo test --target x86_64-unknown-linux-gnu` |
-
-CI uses `esp-rs/xtensa-toolchain@v1.6` and `Swatinem/rust-cache@v2`.
-
 **All CI steps must pass before merging.** Clippy warnings are treated as errors (`-D warnings`).
 
 ---
