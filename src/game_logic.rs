@@ -162,7 +162,7 @@ impl std::fmt::Debug for GameEngine {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "espidf")))]
 mod tests {
     use super::*;
     use crate::mock::ScriptedSensor;

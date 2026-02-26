@@ -1,3 +1,5 @@
+#![cfg(not(target_os = "espidf"))]
+
 use shakmaty::{CastlingMode, Chess, Color, Position, Role, Square, fen::Fen};
 use unnamed_chess_project::feedback::{SquareFeedback, compute_feedback};
 use unnamed_chess_project::game_logic::GameEngine;

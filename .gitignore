@@ -2,3 +2,4 @@
 /.embuild
 /target
 /*.zip
+/rust-analyzer.toml

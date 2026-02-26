@@ -27,44 +27,44 @@ src/
     terminal.rs    — Interactive terminal simulator for manual testing
     display.rs     — TerminalDisplay: ANSI terminal BoardDisplay for development
 build.rs           — Runs embuild ESP-IDF setup only when targeting espidf
-.cargo/config.toml — Linker, runner, and env for ESP32 target
+.cargo/config.toml — Cargo config: default ESP32 target, linker, runner, env
 sdkconfig.defaults — ESP-IDF kernel config (stack size, FreeRTOS tick rate)
 rust-toolchain.toml — Pins stable Rust toolchain with rustfmt/clippy/rust-analyzer
 .mise.toml         — Tool versions (rust, espup, cargo-espflash, ldproxy) and task shortcuts
 Cargo.toml         — Dependencies: shakmaty (chess), thiserror (errors), esp-idf-svc (ESP32)
 ```
 
+## Getting Started
+
+```bash
+# Install tooling and ESP targets
+mise install && mise run setup-esp
+
+# Set up rust-analyzer for host-side editor analysis
+cp rust-analyzer.toml.example rust-analyzer.toml
+sed -i'' -e "s/SET_YOUR_HOST_TARGET_HERE/$(rustc -vV | grep host | cut -d' ' -f2)/" rust-analyzer.toml
+```
+
 ## Building and Testing
 
 ### Host (Development and Testing)
 
-Run tests and simulators on a local machine using the x86_64 target.
-
 ```bash
-# Run all tests
-cargo test --target x86_64-unknown-linux-gnu
-
-# Run interactive terminal simulator
-cargo run --target x86_64-unknown-linux-gnu
-
-# Use mise shortcuts
-mise run test
-mise run dev
+mise run test    # Run all tests
+mise run dev     # Run interactive terminal simulator
 ```
+
+Tests and the simulator require a `--target` flag pointing to your host triple.
+The mise tasks handle this automatically via `$HOST_TARGET`.
 
 ### ESP32 Firmware
 
-Requires the ESP toolchain setup.
+The default cargo target is `xtensa-esp32-espidf`, so `cargo build`
+targets the ESP32. The ESP toolchain is required (`cargo +esp`).
 
 ```bash
-# One-time toolchain installation
-mise install && mise run setup-esp
-
-# Build firmware
-mise run build
-
-# Flash to device
-mise run flash
+mise run build   # Build firmware
+mise run flash   # Flash to device
 ```
 
 ## Development
