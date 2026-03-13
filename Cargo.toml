@@ -27,6 +27,8 @@ shakmaty = "0.29.4"
 thiserror = "2.0.17"
 
 [target.'cfg(target_os = "espidf")'.dependencies]
+ws2812-esp32-rmt-driver = { version = "0.13", features = ["smart-leds-trait"] }
+smart-leds = "0.4"
 esp-idf-svc = "0.51.0"
 
 # --- Optional Embassy Integration ---

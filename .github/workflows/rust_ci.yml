@@ -48,7 +48,7 @@ jobs:
       matrix:
         action:
           - command: +esp build
-            args: --release --target xtensa-esp32-espidf
+            args: --release --target xtensa-esp32s3-espidf
           - command: +esp clippy
             args: --all-targets --all-features --workspace -- -D warnings
     steps:
@@ -58,7 +58,7 @@ jobs:
         uses: esp-rs/xtensa-toolchain@v1.6
         with:
           default: true
-          buildtargets: esp32
+          buildtargets: esp32s3
           ldproxy: true
       - name: Enable caching
         uses: Swatinem/rust-cache@v2

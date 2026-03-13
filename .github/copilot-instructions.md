@@ -40,7 +40,7 @@ Two mutually exclusive code paths exist based on the compilation target:
 
 | Context | Target | Active modules |
 |---|---|---|
-| ESP32 firmware | `xtensa-esp32-espidf` (`target_os = "espidf"`) | `esp32::*` |
+| ESP32-S3 firmware | `xtensa-esp32s3-espidf` (`target_os = "espidf"`) | `esp32::*` |
 | Host (dev/test) | `x86_64-unknown-linux-gnu` | `mock::*` |
 
 Use `#[cfg(target_os = "espidf")]` / `#[cfg(not(target_os = "espidf"))]` for target-specific code. Do **not** put hardware-specific imports in common modules.
@@ -84,7 +84,7 @@ GameEngine::tick(positions.white | positions.black)
 
 ## Hardware Architecture
 
-- **MCU**: ESP32 (Xtensa LX6, `xtensa-esp32-espidf` target)
+- **MCU**: ESP32-S3 (Xtensa LX7, `xtensa-esp32s3-espidf` target)
 - **Sensors**: 64× TI DRV5055A3QDBZR analog ratiometric Hall-effect sensors arranged in an 8×8 grid
   - Scanned via analog multiplexers and the ESP32 ADC
   - Output > VCC/2 = south pole (white piece), output < VCC/2 = north pole (black piece), ≈ VCC/2 = empty
@@ -124,7 +124,7 @@ This format is used extensively in `src/game_logic.rs` tests via `execute_script
 
 ### Host (development / CI tests)
 
-The default cargo target is ESP32 (`xtensa-esp32-espidf`), so host commands
+The default cargo target is ESP32-S3 (`xtensa-esp32s3-espidf`), so host commands
 require an explicit `--target` flag. The mise tasks handle this automatically:
 
 ```bash
@@ -168,7 +168,7 @@ CI runs two job groups. ESP checks wait for host checks to pass first.
 
 | Step | Command |
 |---|---|
-| ESP32 build | `cargo +esp build --release --target xtensa-esp32-espidf` |
+| ESP32 build | `cargo +esp build --release --target xtensa-esp32s3-espidf` |
 | Clippy (ESP32) | `cargo +esp clippy --all-targets --all-features --workspace -- -D warnings` |
 **All CI steps must pass before merging.** Clippy warnings are treated as errors (`-D warnings`).
 

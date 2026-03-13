@@ -1,6 +1,6 @@
 # Smart Chess Board
 
-The Smart Chess Board is an ESP32-based physical chess board that detects piece positions using Hall-effect sensors and provides visual LED feedback. It integrates the shakmaty chess engine to validate moves and manage game state, enabling a seamless bridge between physical and digital chess.
+The Smart Chess Board is an ESP32-S3-based physical chess board that detects piece positions using Hall-effect sensors and provides visual LED feedback. It integrates the shakmaty chess engine to validate moves and manage game state, enabling a seamless bridge between physical and digital chess.
 
 ## Features
 
@@ -32,10 +32,10 @@ mise run dev     # Run interactive terminal simulator
 Tests and the simulator require a `--target` flag pointing to your host triple.
 The mise tasks handle this automatically via `$HOST_TARGET`.
 
-### ESP32 Firmware
+### ESP32-S3 Firmware
 
-The default cargo target is `xtensa-esp32-espidf`, so `cargo build`
-targets the ESP32. The ESP toolchain is required (`cargo +esp`).
+The default cargo target is `xtensa-esp32s3-espidf`, so `cargo build`
+targets the ESP32-S3. The ESP toolchain is required (`cargo +esp`).
 
 ```bash
 mise run build   # Build firmware

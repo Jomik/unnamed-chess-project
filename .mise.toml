@@ -31,11 +31,11 @@ run = "cargo test --target $HOST_TARGET"
 
 [tasks.flash]
 description = "Flash to ESP32 (uses esp toolchain)"
-run = "cargo +esp espflash flash --release --target xtensa-esp32-espidf"
+run = "cargo +esp espflash flash --release --target xtensa-esp32s3-espidf"
 
 [tasks.build]
 description = "Build for ESP32 (uses esp toolchain)"
-run = "cargo +esp build --release --target xtensa-esp32-espidf"
+run = "cargo +esp build --release --target xtensa-esp32s3-espidf"
 
 [tasks.monitor]
 description = "Monitor ESP32 serial output"
