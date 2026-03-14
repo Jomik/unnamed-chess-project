@@ -15,6 +15,9 @@ The Smart Chess Board is an ESP32-S3-based physical chess board that detects pie
 # Install tooling and ESP targets
 mise install && mise run setup-esp
 
+# Clone ESP-IDF (required for firmware builds)
+mise run setup-idf
+
 # Set up rust-analyzer for host-side editor analysis
 cp rust-analyzer.toml.example rust-analyzer.toml
 sed -i'' -e "s/SET_YOUR_HOST_TARGET_HERE/$(rustc -vV | grep host | cut -d' ' -f2)/" rust-analyzer.toml
