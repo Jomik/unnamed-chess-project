@@ -1,6 +1,6 @@
 # rust-analyzer configuration for host-based analysis.
 #
-# The project defaults to the ESP32 target (xtensa-esp32-espidf) with
+# The project defaults to the ESP32-S3 target (xtensa-esp32s3-espidf) with
 # build-std enabled in .cargo/config.toml. Without this override,
 # rust-analyzer attempts to build std from source for the ESP target,
 # which requires the full ESP toolchain.
