@@ -14,12 +14,14 @@ enter = '''
 if ! [ -f ~/export-esp.sh ]; then
     echo "⚠️  ESP toolchain not detected. Run: mise run setup-esp"
 fi
+if ! [ -f .embuild/espressif/esp-idf/v5.5.3/CMakeLists.txt ]; then
+    echo "⚠️  ESP-IDF not found. Run: mise run setup-idf"
+fi
 '''
 
 [tasks.setup-esp]
 description = "Install ESP targets (run once after mise install)"
 run = "espup install"
-
 
 [tasks.dev]
 description = "Run development"
@@ -30,8 +32,8 @@ description = "Run tests on host"
 run = "cargo test --target $HOST_TARGET"
 
 [tasks.flash]
-description = "Flash to ESP32 (uses esp toolchain)"
-run = "cargo +esp espflash flash --release --target xtensa-esp32s3-espidf"
+description = "Flash to ESP32 and monitor serial output"
+run = "cargo +esp espflash flash --release --target xtensa-esp32s3-espidf --monitor"
 
 [tasks.build]
 description = "Build for ESP32 (uses esp toolchain)"
@@ -39,4 +41,4 @@ run = "cargo +esp build --release --target xtensa-esp32s3-espidf"
 
 [tasks.monitor]
 description = "Monitor ESP32 serial output"
-run = "espflash monitor"
+run = "cargo +esp espflash monitor"

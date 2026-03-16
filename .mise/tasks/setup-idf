@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#MISE description="Clone ESP-IDF (workaround for embuild recursive clone failure on macOS)"
+set -euo pipefail
+
+IDF_VERSION="v5.5.3"
+IDF_DIR=".embuild/espressif/esp-idf/$IDF_VERSION"
+
+# Skip if already fully set up (CMock's nested submodule is last step)
+if [ -f "$IDF_DIR/components/cmock/CMock/src/cmock.c" ]; then
+  echo "ESP-IDF $IDF_VERSION already set up at $IDF_DIR"
+  exit 0
+fi
+
+# Step 1: Shallow clone (no submodules — --recursive gets SIGKILL on macOS)
+if [ ! -f "$IDF_DIR/CMakeLists.txt" ]; then
+  echo "Cloning ESP-IDF $IDF_VERSION..."
+  rm -rf "$IDF_DIR"
+  mkdir -p "$(dirname "$IDF_DIR")"
+  git clone --depth 1 --branch "$IDF_VERSION" \
+    https://github.com/espressif/esp-idf.git "$IDF_DIR"
+fi
+
+# Step 2: Initialize submodules one at a time to avoid memory spikes.
+# Bulk `git submodule update --init` gets SIGKILL on macOS with large repos.
+echo "Initializing submodules one at a time (this takes a few minutes)..."
+git -C "$IDF_DIR" submodule init
+git -C "$IDF_DIR" submodule foreach --quiet 'echo $sm_path' | while read -r sm; do
+  if [ -d "$IDF_DIR/$sm/.git" ] || [ -f "$IDF_DIR/$sm/.git" ]; then
+    echo "  ✓ $sm (already initialized)"
+    continue
+  fi
+  echo "  ⏳ $sm"
+  git -C "$IDF_DIR" submodule update --depth 1 -- "$sm"
+done
+
+# Step 3: CMock has nested submodules (Unity, CException)
+echo "Initializing CMock nested submodules..."
+git -C "$IDF_DIR/components/cmock/CMock" submodule update --init --depth 1
+
+echo "ESP-IDF $IDF_VERSION ready."
