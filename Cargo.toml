@@ -10,6 +10,9 @@ rust-version = "1.88.0"
 name = "unnamed-chess-project"
 # harness = false                # do not use the built-in cargo test harness -> resolve rust-analyzer errors
 
+[[bin]]
+name = "diagnostics"
+
 [profile.release]
 opt-level = "s"
 

@@ -39,6 +39,10 @@ run = "cargo +esp espflash flash --release --target xtensa-esp32s3-espidf --moni
 description = "Build for ESP32 (uses esp toolchain)"
 run = "cargo +esp build --release --target xtensa-esp32s3-espidf"
 
+[tasks.flash-diag]
+description = "Flash diagnostics binary and monitor serial output"
+run = "cargo +esp espflash flash --release --target xtensa-esp32s3-espidf --bin diagnostics --monitor"
+
 [tasks.monitor]
 description = "Monitor ESP32 serial output"
 run = "cargo +esp espflash monitor"
