@@ -74,6 +74,15 @@ impl GameEngine {
         self.position.board().piece_at(square)
     }
 
+    #[inline]
+    pub fn expected_positions(&self) -> ByColor<Bitboard> {
+        let board = self.position.board();
+        ByColor {
+            white: board.by_color(Color::White),
+            black: board.by_color(Color::Black),
+        }
+    }
+
     /// Process a board state reading
     ///
     /// Tracks changes in piece positions and executes legal moves when pieces are placed.
