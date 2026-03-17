@@ -5,8 +5,9 @@ fn main() {
     use shakmaty::{Bitboard, ByColor};
     use unnamed_chess_project::esp32::config::{LedPalette, SensorConfig};
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor};
-    use unnamed_chess_project::feedback::compute_feedback;
+    use unnamed_chess_project::feedback::{BoardFeedback, compute_feedback};
     use unnamed_chess_project::game_logic::GameEngine;
+    use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
 
     esp_idf_svc::sys::link_patches();
@@ -36,6 +37,34 @@ fn main() {
 
     let mut display = Esp32LedDisplay::new(peripherals.pins.gpio2, LedPalette::default())
         .expect("failed to init LED display");
+
+    log::info!("Waiting for starting position...");
+    loop {
+        let positions = match sensor.read_positions() {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("Sensor read failed: {e}");
+                esp_idf_svc::hal::delay::FreeRtos::delay_ms(100);
+                continue;
+            }
+        };
+
+        match setup_feedback(&positions) {
+            Some(fb) => {
+                if let Err(e) = display.show(&fb) {
+                    log::warn!("LED update failed: {e}");
+                }
+            }
+            None => break,
+        }
+
+        esp_idf_svc::hal::delay::FreeRtos::delay_ms(50);
+    }
+    log::info!("Starting position detected");
+
+    if let Err(e) = display.show(&BoardFeedback::default()) {
+        log::warn!("LED clear failed: {e}");
+    }
 
     let mut engine = GameEngine::new();
     let mut prev = ByColor {
