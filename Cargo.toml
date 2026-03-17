@@ -5,6 +5,7 @@ authors = ["Jonas Damtoft <Jomik@users.noreply.github.com>"]
 edition = "2024"
 resolver = "2"
 rust-version = "1.88.0"
+default-run = "unnamed-chess-project"
 
 [[bin]]
 name = "unnamed-chess-project"

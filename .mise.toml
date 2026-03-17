@@ -25,7 +25,7 @@ run = "espup install"
 
 [tasks.dev]
 description = "Run development"
-run = "cargo run --target $HOST_TARGET"
+run = "cargo run --target $HOST_TARGET --bin unnamed-chess-project"
 
 [tasks.test]
 description = "Run tests on host"
@@ -33,7 +33,7 @@ run = "cargo test --target $HOST_TARGET"
 
 [tasks.flash]
 description = "Flash to ESP32 and monitor serial output"
-run = "cargo +esp espflash flash --release --target xtensa-esp32s3-espidf --monitor"
+run = "cargo +esp espflash flash --release --target xtensa-esp32s3-espidf --bin unnamed-chess-project --monitor"
 
 [tasks.build]
 description = "Build for ESP32 (uses esp toolchain)"

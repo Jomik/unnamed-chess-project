@@ -2,6 +2,7 @@ use shakmaty::{Bitboard, ByColor};
 
 pub mod feedback;
 pub mod game_logic;
+pub mod setup;
 
 /// Trait for reading piece positions from the board.
 ///
