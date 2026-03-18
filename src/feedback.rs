@@ -1,4 +1,4 @@
-use shakmaty::{Bitboard, Move, Square};
+use shakmaty::{Bitboard, CastlingSide, Move, Square};
 
 /// Check status information for feedback display
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +97,11 @@ pub trait FeedbackSource {
 
     /// Get check information if the side to move is in check
     fn check_info(&self) -> Option<CheckInfo>;
+
+    /// Move guidance during castling: (piece_origin, piece_target).
+    /// Present when a castle move was executed but a piece hasn't
+    /// physically arrived at its target square yet.
+    fn move_guidance(&self) -> Option<(Square, Square)>;
 }
 
 /// Compute visual feedback based on current game state.
@@ -105,7 +110,12 @@ pub trait FeedbackSource {
 /// - Piece lifted: shows legal destinations
 /// - Opponent piece removed: shows which pieces can capture there
 /// - Both: shows where to complete the capture
+/// - Move guidance active: shows where to place a piece to complete a move
 pub fn compute_feedback(source: &impl FeedbackSource) -> BoardFeedback {
+    if let Some((origin, target)) = source.move_guidance() {
+        return show_move_guidance(origin, target);
+    }
+
     let captured = source.captured_piece();
     let lifted = source.lifted_piece();
 
@@ -128,6 +138,14 @@ pub fn compute_feedback(source: &impl FeedbackSource) -> BoardFeedback {
             }
         }
     }
+}
+
+/// Show where to place a piece to complete a move in progress
+fn show_move_guidance(origin: Square, target: Square) -> BoardFeedback {
+    let mut fb = BoardFeedback::new();
+    fb.set(origin, SquareFeedback::Origin);
+    fb.set(target, SquareFeedback::Destination);
+    fb
 }
 
 /// Show legal destinations when a piece is lifted
@@ -183,12 +201,16 @@ fn show_check_feedback(check_info: &CheckInfo) -> BoardFeedback {
     fb
 }
 
-/// Classify a move as either a capture or regular destination
+/// Classify a move's target square and feedback type
 fn classify_move(mv: &Move) -> (Square, SquareFeedback) {
-    if mv.is_capture() {
-        (mv.to(), SquareFeedback::Capture)
-    } else {
-        (mv.to(), SquareFeedback::Destination)
+    match mv {
+        Move::Castle { king, rook } => {
+            let side = CastlingSide::from_king_side(*king < *rook);
+            let target = Square::from_coords(side.king_to_file(), king.rank());
+            (target, SquareFeedback::Destination)
+        }
+        _ if mv.is_capture() => (mv.to(), SquareFeedback::Capture),
+        _ => (mv.to(), SquareFeedback::Destination),
     }
 }
 
@@ -218,6 +240,7 @@ mod tests {
         lifted: Option<Square>,
         captured: Option<Square>,
         check: Option<CheckInfo>,
+        move_guidance: Option<(Square, Square)>,
     }
 
     impl MockFeedbackSource {
@@ -252,6 +275,7 @@ mod tests {
                 lifted: None,
                 captured: None,
                 check,
+                move_guidance: None,
             }
         }
 
@@ -283,6 +307,10 @@ mod tests {
 
         fn check_info(&self) -> Option<CheckInfo> {
             self.check
+        }
+
+        fn move_guidance(&self) -> Option<(Square, Square)> {
+            self.move_guidance
         }
     }
 

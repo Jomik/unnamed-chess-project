@@ -1,7 +1,7 @@
 use crate::feedback::{CheckInfo, FeedbackSource};
 use shakmaty::{
-    Bitboard, ByColor, Chess, Color, EnPassantMode, Move, MoveList, Piece, Position, Role, Square,
-    fen::Fen,
+    Bitboard, ByColor, CastlingSide, Chess, Color, EnPassantMode, Move, MoveList, Piece, Position,
+    Role, Square, fen::Fen,
 };
 
 /// Current game state snapshot for feedback and display
@@ -12,6 +12,10 @@ pub struct GameState {
     captured_piece: Option<Square>,
     king_square: Square,
     checkers: Bitboard,
+    /// Move guidance during castling: (piece_origin, piece_target).
+    /// Set when a castle move has been executed but a piece hasn't
+    /// physically moved to its target square yet.
+    move_guidance: Option<(Square, Square)>,
 }
 
 impl FeedbackSource for GameState {
@@ -36,6 +40,10 @@ impl FeedbackSource for GameState {
                 checkers: self.checkers,
             })
         }
+    }
+
+    fn move_guidance(&self) -> Option<(Square, Square)> {
+        self.move_guidance
     }
 }
 
@@ -87,14 +95,32 @@ impl GameEngine {
     ///
     /// Tracks changes in piece positions and executes legal moves when pieces are placed.
     pub fn tick(&mut self, current: ByColor<Bitboard>) -> GameState {
-        self.process_moves(current);
+        let played = self.process_moves(current);
 
         let current_combined = current.white | current.black;
         let lifted = self.position.us() & !current_combined;
         let captured = self.position.them() & !current_combined;
+
+        let move_guidance = played
+            .and_then(|mv| self.castle_rook_guidance(&mv, current_combined))
+            .or_else(|| self.detect_mid_castle(current));
+
+        // When both king and rook are lifted for castling, report the
+        // king's origin so feedback can show castle destinations.
+        let lifted_piece = lifted.single_square().or_else(|| {
+            if lifted.count() != 2 {
+                return None;
+            }
+            self.position
+                .legal_moves()
+                .iter()
+                .find(|mv| matches!(mv, Move::Castle { king, rook } if lifted.contains(*king) && lifted.contains(*rook)))
+                .and_then(|mv| mv.from())
+        });
+
         GameState {
             legal_moves: self.position.legal_moves(),
-            lifted_piece: lifted.single_square(),
+            lifted_piece,
             captured_piece: captured.single_square(),
             checkers: self.position.checkers(),
             king_square: self
@@ -102,13 +128,54 @@ impl GameEngine {
                 .our(Role::King)
                 .first()
                 .expect("king must exist"),
+            move_guidance,
         }
     }
 
-    /// Process any completed moves based on sensor state
-    fn process_moves(&mut self, current: ByColor<Bitboard>) {
+    /// After a castle move is played, check if the rook still needs to
+    /// physically move to its target square.
+    fn castle_rook_guidance(&self, mv: &Move, physical: Bitboard) -> Option<(Square, Square)> {
+        match mv {
+            Move::Castle { king, rook } => {
+                let side = CastlingSide::from_king_side(*king < *rook);
+                let color = self.position.turn().other();
+                let rook_target = side.rook_to(color);
+                if physical.contains(rook_target) {
+                    None
+                } else {
+                    Some((*rook, rook_target))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Detect mid-castle: king placed on castle target but the move
+    /// hasn't completed because the rook is still on its origin square.
+    fn detect_mid_castle(&self, current: ByColor<Bitboard>) -> Option<(Square, Square)> {
+        let turn = self.position.turn();
+        let our_current = current[turn];
+        let expected_our = self.position.board().by_color(turn);
+        let newly_placed = our_current & !expected_our;
+
+        for mv in self.position.legal_moves() {
+            if let Move::Castle { king, rook } = mv {
+                let side = CastlingSide::from_king_side(king < rook);
+                let king_target = side.king_to(turn);
+                if newly_placed.contains(king_target) {
+                    let rook_target = side.rook_to(turn);
+                    return Some((rook, rook_target));
+                }
+            }
+        }
+        None
+    }
+
+    /// Process any completed moves based on sensor state.
+    /// Returns the move that was played, if any.
+    fn process_moves(&mut self, current: ByColor<Bitboard>) -> Option<Move> {
         if current == self.last_positions {
-            return; // Physical board hasn't changed
+            return None;
         }
 
         let turn = self.position.turn();
@@ -123,7 +190,7 @@ impl GameEngine {
 
         // Wait until our piece is placed before processing moves.
         if our_placed.is_empty() {
-            return;
+            return None;
         }
 
         let current_combined = current.white | current.black;
@@ -149,9 +216,11 @@ impl GameEngine {
 
             if after.board().occupied() == current_combined {
                 self.position = after;
-                break;
+                return Some(mv);
             }
         }
+
+        None
     }
 }
 

@@ -280,26 +280,142 @@ fn en_passant_full_sequence() {
 // ---------------------------------------------------------------
 
 #[test]
-fn kingside_castling_feedback() {
+fn kingside_castle_king_lifted_shows_king_target() {
     // White can castle kingside
     let (mut engine, mut sensor) = setup_fen(
         "rnbqkbnr/pppppppp/8/8/8/5NP1/PPPPPPBP/\
          RNBQK2R w KQkq - 0 1",
     );
 
-    // Lift king
+    // Lift king only
     sensor.push_script("e1.").expect("valid script");
 
     let state = tick(&mut engine, &mut sensor);
     let fb = compute_feedback(&state);
 
-    assert_eq!(fb.get(Square::E1), Some(SquareFeedback::Origin),);
-    // Castle move's to() is the rook origin (h1), so
-    // feedback shows h1 as the destination, not g1.
+    assert_eq!(fb.get(Square::E1), Some(SquareFeedback::Origin));
+    assert_eq!(
+        fb.get(Square::G1),
+        Some(SquareFeedback::Destination),
+        "king target g1 should be highlighted"
+    );
+    // The king also has a regular move to f1
+    assert_eq!(fb.get(Square::F1), Some(SquareFeedback::Destination));
+    // Rook's origin should NOT be highlighted as a destination
     assert_eq!(
         fb.get(Square::H1),
+        None,
+        "rook origin h1 should not be a destination"
+    );
+}
+
+#[test]
+fn queenside_castle_king_lifted_shows_king_target() {
+    // White can castle queenside
+    let (mut engine, mut sensor) = setup_fen(
+        "r1bqkbnr/ppp3pp/2n1pp2/3p4/3P1B2/2NQ4/PPP1PPPP/\
+         R3KBNR w KQkq - 0 1",
+    );
+
+    // Lift king only
+    sensor.push_script("e1.").expect("valid script");
+
+    let state = tick(&mut engine, &mut sensor);
+    let fb = compute_feedback(&state);
+
+    assert_eq!(fb.get(Square::E1), Some(SquareFeedback::Origin));
+    assert_eq!(
+        fb.get(Square::C1),
         Some(SquareFeedback::Destination),
-        "castling destination shows rook origin h1"
+        "king target c1 should be highlighted"
+    );
+    // Rook's origin should NOT be highlighted as a destination
+    assert_eq!(
+        fb.get(Square::A1),
+        None,
+        "rook origin a1 should not be a destination"
+    );
+}
+
+#[test]
+fn kingside_castle_both_lifted_shows_both_targets() {
+    // White can castle kingside
+    let (mut engine, mut sensor) = setup_fen(
+        "rnbqkbnr/pppppppp/8/8/8/5NP1/PPPPPPBP/\
+         RNBQK2R w KQkq - 0 1",
+    );
+
+    // Lift both king and rook
+    sensor.push_script("e1 h1.").expect("valid script");
+
+    let state = tick(&mut engine, &mut sensor);
+    let fb = compute_feedback(&state);
+
+    assert_eq!(
+        fb.get(Square::G1),
+        Some(SquareFeedback::Destination),
+        "king target g1"
+    );
+    assert_eq!(
+        fb.get(Square::F1),
+        Some(SquareFeedback::Destination),
+        "rook target f1"
+    );
+}
+
+#[test]
+fn kingside_castle_king_placed_shows_rook_guidance() {
+    // White can castle kingside
+    let (mut engine, mut sensor) = setup_fen(
+        "rnbqkbnr/pppppppp/8/8/8/5NP1/PPPPPPBP/\
+         RNBQK2R w KQkq - 0 1",
+    );
+
+    // Lift king, then place king on g1 (rook still on h1)
+    sensor.push_script("e1. Wg1.").expect("valid script");
+
+    tick(&mut engine, &mut sensor); // lift king
+    let state = tick(&mut engine, &mut sensor); // place king on g1
+    let fb = compute_feedback(&state);
+
+    // Castling isn't complete yet — rook needs to move from h1 to f1.
+    // The rook's origin should be Origin and its target should be Destination.
+    assert_eq!(
+        fb.get(Square::H1),
+        Some(SquareFeedback::Origin),
+        "rook origin h1 should prompt removal"
+    );
+    assert_eq!(
+        fb.get(Square::F1),
+        Some(SquareFeedback::Destination),
+        "rook target f1 should be highlighted"
+    );
+}
+
+#[test]
+fn queenside_castle_king_placed_shows_rook_guidance() {
+    // White can castle queenside
+    let (mut engine, mut sensor) = setup_fen(
+        "r1bqkbnr/ppp3pp/2n1pp2/3p4/3P1B2/2NQ4/PPP1PPPP/\
+         R3KBNR w KQkq - 0 1",
+    );
+
+    // Lift king, then place king on c1 (rook still on a1)
+    sensor.push_script("e1. Wc1.").expect("valid script");
+
+    tick(&mut engine, &mut sensor); // lift king
+    let state = tick(&mut engine, &mut sensor); // place king on c1
+    let fb = compute_feedback(&state);
+
+    assert_eq!(
+        fb.get(Square::A1),
+        Some(SquareFeedback::Origin),
+        "rook origin a1 should prompt removal"
+    );
+    assert_eq!(
+        fb.get(Square::D1),
+        Some(SquareFeedback::Destination),
+        "rook target d1 should be highlighted"
     );
 }
 
@@ -331,6 +447,31 @@ fn kingside_castling_completes() {
             role: Role::Rook,
             color: Color::White,
         }),
+    );
+}
+
+#[test]
+fn black_kingside_castle_king_lifted_shows_king_target() {
+    let (mut engine, mut sensor) = setup_fen(
+        "rnbqk2r/pppp1ppp/5n2/2b1p3/2B1P3/5N2/PPPP1PPP/\
+         RNBQ1RK1 b kq - 5 4",
+    );
+
+    sensor.push_script("e8.").expect("valid script");
+
+    let state = tick(&mut engine, &mut sensor);
+    let fb = compute_feedback(&state);
+
+    assert_eq!(fb.get(Square::E8), Some(SquareFeedback::Origin));
+    assert_eq!(
+        fb.get(Square::G8),
+        Some(SquareFeedback::Destination),
+        "king target g8"
+    );
+    assert_eq!(
+        fb.get(Square::H8),
+        None,
+        "rook origin h8 should not be a destination"
     );
 }
 
