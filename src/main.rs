@@ -7,6 +7,7 @@ fn main() {
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor};
     use unnamed_chess_project::feedback::{BoardFeedback, compute_feedback};
     use unnamed_chess_project::game_logic::GameEngine;
+    use unnamed_chess_project::recovery::recovery_feedback;
     use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
 
@@ -104,6 +105,14 @@ fn main() {
 
         let state = engine.tick(positions);
         let feedback = compute_feedback(&state);
+
+        // When idle (no move in progress), check if the physical board
+        // diverges from the game state and guide the user to fix it.
+        let feedback = if feedback.is_empty() {
+            recovery_feedback(&engine.expected_positions(), &positions).unwrap_or(feedback)
+        } else {
+            feedback
+        };
 
         if let Err(e) = display.show(&feedback) {
             log::warn!("LED update failed: {e}");
