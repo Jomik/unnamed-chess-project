@@ -1,4 +1,4 @@
-use shakmaty::{Bitboard, CastlingSide, Move, Square};
+use shakmaty::{Bitboard, CastlingSide, Color, File, Move, Rank, Square};
 
 /// Check status information for feedback display
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7,6 +7,25 @@ pub struct CheckInfo {
     pub king_square: Square,
     /// Bitboard of pieces giving check (1-2 pieces)
     pub checkers: Bitboard,
+}
+
+/// Game-over state carrying the information needed for visual feedback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameOutcome {
+    /// Checkmate: the side to move has no legal moves and is in check.
+    Checkmate {
+        /// Square of the checkmated king (loser)
+        king_square: Square,
+        /// Pieces delivering checkmate
+        checkers: Bitboard,
+        /// Color of the losing side
+        loser: Color,
+    },
+    /// Stalemate: the side to move has no legal moves but is not in check.
+    Stalemate {
+        white_king: Square,
+        black_king: Square,
+    },
 }
 
 /// Type of visual feedback for an individual square
@@ -22,6 +41,10 @@ pub enum SquareFeedback {
     Check,
     /// Piece attacking king
     Checker,
+    /// Winning piece (delivered checkmate)
+    Victory,
+    /// King in stalemate (neither side wins)
+    Stalemate,
 }
 
 /// Contains the set of squares and their associated feedback types for the current board state.
@@ -102,6 +125,9 @@ pub trait FeedbackSource {
     /// Present when a castle move was executed but a piece hasn't
     /// physically arrived at its target square yet.
     fn move_guidance(&self) -> Option<(Square, Square)>;
+
+    /// Game outcome, if the game has ended.
+    fn outcome(&self) -> Option<GameOutcome>;
 }
 
 /// Compute visual feedback based on current game state.
@@ -112,6 +138,10 @@ pub trait FeedbackSource {
 /// - Both: shows where to complete the capture
 /// - Move guidance active: shows where to place a piece to complete a move
 pub fn compute_feedback(source: &impl FeedbackSource) -> BoardFeedback {
+    if let Some(outcome) = source.outcome() {
+        return show_outcome_feedback(outcome);
+    }
+
     if let Some((origin, target)) = source.move_guidance() {
         return show_move_guidance(origin, target);
     }
@@ -146,6 +176,50 @@ fn show_move_guidance(origin: Square, target: Square) -> BoardFeedback {
     fb.set(origin, SquareFeedback::Origin);
     fb.set(target, SquareFeedback::Destination);
     fb
+}
+
+/// Show game-over feedback based on the outcome.
+fn show_outcome_feedback(outcome: GameOutcome) -> BoardFeedback {
+    let mut fb = BoardFeedback::new();
+    match outcome {
+        GameOutcome::Checkmate {
+            king_square,
+            checkers,
+            loser,
+        } => {
+            let loser_rank = back_rank(loser);
+            let winner_rank = back_rank(loser.other());
+            fill_rank(&mut fb, winner_rank, SquareFeedback::Victory);
+            fill_rank(&mut fb, loser_rank, SquareFeedback::Check);
+            fb.set(king_square, SquareFeedback::Check);
+            for sq in checkers {
+                fb.set(sq, SquareFeedback::Victory);
+            }
+        }
+        GameOutcome::Stalemate {
+            white_king,
+            black_king,
+        } => {
+            fill_rank(&mut fb, Rank::First, SquareFeedback::Stalemate);
+            fill_rank(&mut fb, Rank::Eighth, SquareFeedback::Stalemate);
+            fb.set(white_king, SquareFeedback::Stalemate);
+            fb.set(black_king, SquareFeedback::Stalemate);
+        }
+    }
+    fb
+}
+
+fn back_rank(color: Color) -> Rank {
+    match color {
+        Color::White => Rank::First,
+        Color::Black => Rank::Eighth,
+    }
+}
+
+fn fill_rank(fb: &mut BoardFeedback, rank: Rank, feedback: SquareFeedback) {
+    for file in File::ALL {
+        fb.set(Square::from_coords(file, rank), feedback);
+    }
 }
 
 /// Show legal destinations when a piece is lifted
@@ -241,6 +315,7 @@ mod tests {
         captured: Option<Square>,
         check: Option<CheckInfo>,
         move_guidance: Option<(Square, Square)>,
+        outcome: Option<GameOutcome>,
     }
 
     impl MockFeedbackSource {
@@ -276,6 +351,7 @@ mod tests {
                 captured: None,
                 check,
                 move_guidance: None,
+                outcome: None,
             }
         }
 
@@ -311,6 +387,10 @@ mod tests {
 
         fn move_guidance(&self) -> Option<(Square, Square)> {
             self.move_guidance
+        }
+
+        fn outcome(&self) -> Option<GameOutcome> {
+            self.outcome
         }
     }
 
@@ -445,5 +525,73 @@ mod tests {
         assert_eq!(feedback.get(Square::E8), Some(SquareFeedback::Check));
         assert_eq!(feedback.get(Square::E1), Some(SquareFeedback::Checker)); // Rook
         assert_eq!(feedback.get(Square::H5), Some(SquareFeedback::Checker)); // Bishop
+    }
+
+    #[test]
+    fn test_checkmate_feedback() {
+        let mut source = MockFeedbackSource::new();
+        source.outcome = Some(GameOutcome::Checkmate {
+            king_square: Square::E8,
+            checkers: Bitboard::from(Square::F7),
+            loser: Color::Black,
+        });
+
+        let feedback = compute_feedback(&source);
+
+        assert_eq!(feedback.get(Square::E8), Some(SquareFeedback::Check));
+        assert_eq!(feedback.get(Square::F7), Some(SquareFeedback::Victory));
+        // Back rank fill: white rank 1 = Victory, black rank 8 = Check
+        assert_eq!(feedback.get(Square::A1), Some(SquareFeedback::Victory));
+        assert_eq!(feedback.get(Square::H1), Some(SquareFeedback::Victory));
+        assert_eq!(feedback.get(Square::A8), Some(SquareFeedback::Check));
+        // E8 already has Check from king, so just verify it's still Check
+        assert_eq!(feedback.get(Square::D8), Some(SquareFeedback::Check));
+        assert_eq!(feedback.squares().count(), 17);
+    }
+
+    #[test]
+    fn test_stalemate_feedback() {
+        let mut source = MockFeedbackSource::new();
+        source.outcome = Some(GameOutcome::Stalemate {
+            white_king: Square::C6,
+            black_king: Square::A8,
+        });
+
+        let feedback = compute_feedback(&source);
+
+        assert_eq!(feedback.get(Square::C6), Some(SquareFeedback::Stalemate));
+        assert_eq!(feedback.get(Square::A8), Some(SquareFeedback::Stalemate));
+        assert_eq!(feedback.get(Square::A1), Some(SquareFeedback::Stalemate));
+        assert_eq!(feedback.get(Square::H1), Some(SquareFeedback::Stalemate));
+        assert_eq!(feedback.get(Square::H8), Some(SquareFeedback::Stalemate));
+        // 8 (rank 1) + 8 (rank 8) + 1 (C6 king, off back rank) = 17
+        assert_eq!(feedback.squares().count(), 17);
+    }
+
+    #[test]
+    fn test_outcome_takes_priority_over_check() {
+        let mut source = MockFeedbackSource::from_fen(
+            "rnbqkbnr/pppp2pp/8/4pp1Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1",
+        );
+        source.outcome = Some(GameOutcome::Checkmate {
+            king_square: Square::E8,
+            checkers: Bitboard::from(Square::H5),
+            loser: Color::Black,
+        });
+        source.lifted = Some(Square::G8);
+
+        let feedback = compute_feedback(&source);
+
+        assert_eq!(
+            feedback.get(Square::E8),
+            Some(SquareFeedback::Check),
+            "outcome feedback, not move destinations"
+        );
+        assert_eq!(feedback.get(Square::H5), Some(SquareFeedback::Victory));
+        assert_eq!(
+            feedback.get(Square::G8),
+            Some(SquareFeedback::Check),
+            "lifted piece should get rank fill, not Origin"
+        );
     }
 }

@@ -235,6 +235,8 @@ fn get_game_state_symbol(
         Some(SquareFeedback::Origin) => format!("\x1b[42m {} \x1b[0m", symbol),      // Green
         Some(SquareFeedback::Check) => format!("\x1b[45m {} \x1b[0m", symbol),       // Magenta
         Some(SquareFeedback::Checker) => format!("\x1b[43m {} \x1b[0m", symbol),     // Yellow
+        Some(SquareFeedback::Victory) => format!("\x1b[102m {} \x1b[0m", symbol),    // Bright green
+        Some(SquareFeedback::Stalemate) => format!("\x1b[103m {} \x1b[0m", symbol), // Bright yellow
         None => format!(" {} ", symbol),
     }
 }

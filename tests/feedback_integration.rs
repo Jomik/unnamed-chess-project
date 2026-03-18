@@ -563,3 +563,63 @@ fn knight_lift_shows_only_valid_destinations() {
     // d2 is blocked by own pawn
     assert_eq!(fb.get(Square::D2), None);
 }
+
+// ---------------------------------------------------------------
+// Game-over: checkmate and stalemate feedback
+// ---------------------------------------------------------------
+
+#[test]
+fn scholars_mate_shows_checkmate_feedback() {
+    let (mut engine, mut sensor) = setup();
+
+    // 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6?? 4.Qxf7#
+    sensor
+        .push_script("e2 We4. e7 Be5. f1 Wc4. b8 Bc6. d1 Wh5. g8 Bf6. f7 h5 Wf7.")
+        .expect("valid script");
+    sensor
+        .drain(|p| {
+            engine.tick(p);
+        })
+        .expect("valid sensor state");
+
+    let state = engine.tick(sensor.read_positions());
+    let fb = compute_feedback(&state);
+
+    assert_eq!(
+        fb.get(Square::E8),
+        Some(SquareFeedback::Check),
+        "checkmated king should show Check"
+    );
+    assert_eq!(
+        fb.get(Square::F7),
+        Some(SquareFeedback::Victory),
+        "checkmating queen should show Victory"
+    );
+    // Back rank fill: white (winner) rank 1 = Victory, black (loser) rank 8 = Check
+    assert_eq!(fb.get(Square::A1), Some(SquareFeedback::Victory));
+    assert_eq!(fb.get(Square::A8), Some(SquareFeedback::Check));
+}
+
+#[test]
+fn stalemate_shows_both_kings() {
+    // White: Qb6, Kc6. Black: Ka8. Black to move — stalemate.
+    let (mut engine, sensor) = setup_fen("k7/8/1QK5/8/8/8/8/8 b - - 0 1");
+
+    let state = engine.tick(sensor.read_positions());
+    let fb = compute_feedback(&state);
+
+    assert_eq!(
+        fb.get(Square::A8),
+        Some(SquareFeedback::Stalemate),
+        "black king should show Stalemate"
+    );
+    assert_eq!(
+        fb.get(Square::C6),
+        Some(SquareFeedback::Stalemate),
+        "white king should show Stalemate"
+    );
+    // Both back ranks filled with Stalemate
+    assert_eq!(fb.get(Square::A1), Some(SquareFeedback::Stalemate));
+    assert_eq!(fb.get(Square::H1), Some(SquareFeedback::Stalemate));
+    assert_eq!(fb.get(Square::H8), Some(SquareFeedback::Stalemate));
+}
