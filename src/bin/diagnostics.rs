@@ -39,6 +39,8 @@ fn main() {
         origin: Rgb8::new(0, 0, 0),
         check: Rgb8::new(0, 0, 0),
         checker: Rgb8::new(0, 0, 0),
+        victory: Rgb8::new(0, 0, 0),
+        stalemate: Rgb8::new(0, 0, 0),
     };
 
     let mut display = Esp32LedDisplay::new(peripherals.pins.gpio2, diag_palette)

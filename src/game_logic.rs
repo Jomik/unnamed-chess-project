@@ -1,4 +1,4 @@
-use crate::feedback::{CheckInfo, FeedbackSource};
+use crate::feedback::{CheckInfo, FeedbackSource, GameOutcome};
 use shakmaty::{
     Bitboard, ByColor, CastlingSide, Chess, Color, EnPassantMode, Move, MoveList, Piece, Position,
     Role, Square, fen::Fen,
@@ -16,6 +16,7 @@ pub struct GameState {
     /// Set when a castle move has been executed but a piece hasn't
     /// physically moved to its target square yet.
     move_guidance: Option<(Square, Square)>,
+    outcome: Option<GameOutcome>,
 }
 
 impl FeedbackSource for GameState {
@@ -44,6 +45,10 @@ impl FeedbackSource for GameState {
 
     fn move_guidance(&self) -> Option<(Square, Square)> {
         self.move_guidance
+    }
+
+    fn outcome(&self) -> Option<GameOutcome> {
+        self.outcome
     }
 }
 
@@ -105,6 +110,8 @@ impl GameEngine {
             .and_then(|mv| self.castle_rook_guidance(&mv, current_combined))
             .or_else(|| self.detect_mid_castle(current));
 
+        let outcome = self.compute_outcome();
+
         // When both king and rook are lifted for castling, report the
         // king's origin so feedback can show castle destinations.
         let lifted_piece = lifted.single_square().or_else(|| {
@@ -129,6 +136,7 @@ impl GameEngine {
                 .first()
                 .expect("king must exist"),
             move_guidance,
+            outcome,
         }
     }
 
@@ -169,6 +177,46 @@ impl GameEngine {
             }
         }
         None
+    }
+
+    /// Compute game outcome from the current position.
+    fn compute_outcome(&self) -> Option<GameOutcome> {
+        if !self.position.legal_moves().is_empty() {
+            return None;
+        }
+
+        if self.position.is_check() {
+            // The side to move is checkmated (they have no escape).
+            let king_square = self
+                .position
+                .our(Role::King)
+                .first()
+                .expect("king must exist");
+            Some(GameOutcome::Checkmate {
+                king_square,
+                checkers: self.position.checkers(),
+                loser: self.position.turn(),
+            })
+        } else {
+            let white_king = self
+                .position
+                .board()
+                .by_role(Role::King)
+                .intersect(self.position.board().by_color(Color::White))
+                .first()
+                .expect("white king must exist");
+            let black_king = self
+                .position
+                .board()
+                .by_role(Role::King)
+                .intersect(self.position.board().by_color(Color::Black))
+                .first()
+                .expect("black king must exist");
+            Some(GameOutcome::Stalemate {
+                white_king,
+                black_king,
+            })
+        }
     }
 
     /// Process any completed moves based on sensor state.

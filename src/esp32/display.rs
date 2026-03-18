@@ -131,6 +131,8 @@ impl<'d> Esp32LedDisplay<'d> {
             SquareFeedback::Origin => self.palette.origin,
             SquareFeedback::Check => self.palette.check,
             SquareFeedback::Checker => self.palette.checker,
+            SquareFeedback::Victory => self.palette.victory,
+            SquareFeedback::Stalemate => self.palette.stalemate,
         }
     }
 

@@ -58,6 +58,8 @@ fn format_square(feedback: Option<SquareFeedback>) -> &'static str {
         Some(SquareFeedback::Origin) => "\x1b[42m · \x1b[0m",
         Some(SquareFeedback::Check) => "\x1b[45m · \x1b[0m",
         Some(SquareFeedback::Checker) => "\x1b[43m · \x1b[0m",
+        Some(SquareFeedback::Victory) => "\x1b[102m · \x1b[0m",
+        Some(SquareFeedback::Stalemate) => "\x1b[103m · \x1b[0m",
         None => " · ",
     }
 }

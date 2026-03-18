@@ -41,6 +41,8 @@ pub struct LedPalette {
     pub origin: Rgb8,
     pub check: Rgb8,
     pub checker: Rgb8,
+    pub victory: Rgb8,
+    pub stalemate: Rgb8,
 }
 
 impl Default for LedPalette {
@@ -52,6 +54,8 @@ impl Default for LedPalette {
             origin: Rgb8::new(0, 0, 20),
             check: Rgb8::new(20, 0, 0),
             checker: Rgb8::new(20, 0, 0),
+            victory: Rgb8::new(0, 20, 0),
+            stalemate: Rgb8::new(20, 15, 0),
         }
     }
 }
