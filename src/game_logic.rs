@@ -96,11 +96,24 @@ impl GameEngine {
         }
     }
 
+    #[inline]
+    pub fn position(&self) -> &Chess {
+        &self.position
+    }
+
+    #[inline]
+    pub fn turn(&self) -> Color {
+        self.position.turn()
+    }
+
     /// Process a board state reading
     ///
     /// Tracks changes in piece positions and executes legal moves when pieces are placed.
     pub fn tick(&mut self, current: ByColor<Bitboard>) -> GameState {
-        let played = self.process_moves(current);
+        let changed = current != self.last_positions;
+        self.last_positions = current;
+
+        let played = self.process_moves(current, changed);
 
         let current_combined = current.white | current.black;
         let lifted = self.position.us() & !current_combined;
@@ -227,8 +240,8 @@ impl GameEngine {
 
     /// Process any completed moves based on sensor state.
     /// Returns the move that was played, if any.
-    fn process_moves(&mut self, current: ByColor<Bitboard>) -> Option<Move> {
-        if current == self.last_positions {
+    fn process_moves(&mut self, current: ByColor<Bitboard>, changed: bool) -> Option<Move> {
+        if !changed {
             return None;
         }
 
@@ -238,9 +251,6 @@ impl GameEngine {
 
         // Pieces of our color that are newly placed relative to the game's expected state.
         let our_placed = our_current & !expected_our;
-
-        // Update last_positions
-        self.last_positions = current;
 
         // Wait until our piece is placed before processing moves.
         if our_placed.is_empty() {
