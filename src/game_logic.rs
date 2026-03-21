@@ -4,6 +4,12 @@ use shakmaty::{
     Role, Square, fen::Fen,
 };
 
+#[derive(Debug, thiserror::Error)]
+pub enum OpponentMoveError {
+    #[error("opponent move is not legal in the current position")]
+    IllegalMove,
+}
+
 /// Current game state snapshot for feedback and display
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameState {
@@ -17,6 +23,8 @@ pub struct GameState {
     /// physically moved to its target square yet.
     move_guidance: Option<GuidanceStep>,
     outcome: Option<GameOutcome>,
+    /// The human move committed during this tick, if any.
+    human_move: Option<Move>,
 }
 
 impl FeedbackSource for GameState {
@@ -49,6 +57,12 @@ impl FeedbackSource for GameState {
 
     fn outcome(&self) -> Option<GameOutcome> {
         self.outcome
+    }
+}
+
+impl GameState {
+    pub fn human_move(&self) -> Option<&Move> {
+        self.human_move.as_ref()
     }
 }
 
@@ -96,15 +110,49 @@ impl GameEngine {
         }
     }
 
+    #[inline]
+    pub fn position(&self) -> &Chess {
+        &self.position
+    }
+
+    #[inline]
+    pub fn turn(&self) -> Color {
+        self.position.turn()
+    }
+
+    /// Apply a computer opponent's move, advancing the logical position.
+    pub fn apply_opponent_move(&mut self, mv: &Move) -> Result<(), OpponentMoveError> {
+        if !self.position.legal_moves().contains(mv) {
+            return Err(OpponentMoveError::IllegalMove);
+        }
+
+        self.position.play_unchecked(*mv);
+        Ok(())
+    }
+
     /// Process a board state reading
     ///
     /// Tracks changes in piece positions and executes legal moves when pieces are placed.
     pub fn tick(&mut self, current: ByColor<Bitboard>) -> GameState {
+        let prev_combined = self.last_positions.white | self.last_positions.black;
+        let current_combined = current.white | current.black;
+
         let played = self.process_moves(current);
 
-        let current_combined = current.white | current.black;
         let lifted = self.position.us() & !current_combined;
-        let captured = self.position.them() & !current_combined;
+        // Only report captured for pieces the human physically removed.
+        // After apply_opponent_move(), the logical position may expect
+        // pieces on squares that were never physically occupied.
+        let captured = self.position.them() & !current_combined & prev_combined;
+
+        // Suppress lifted/captured when the board has divergence beyond
+        // those squares — indicates recovery, not a human move in progress.
+        let expected_white = self.position.board().by_color(Color::White);
+        let expected_black = self.position.board().by_color(Color::Black);
+        let occupancy_diff =
+            (self.position.board().occupied() ^ current_combined) & !lifted & !captured;
+        let wrong_color = (expected_white & current.black) | (expected_black & current.white);
+        let in_recovery = !occupancy_diff.is_empty() || !wrong_color.is_empty();
 
         let legal_moves = self.position.legal_moves();
 
@@ -114,18 +162,36 @@ impl GameEngine {
 
         let outcome = Self::compute_outcome(&self.position, &legal_moves);
 
-        GameState {
-            lifted_piece: Self::resolve_lifted_piece(&legal_moves, lifted),
-            captured_piece: captured.single_square(),
-            checkers: self.position.checkers(),
-            king_square: self
-                .position
-                .our(Role::King)
-                .first()
-                .expect("king must exist"),
-            move_guidance,
-            outcome,
-            legal_moves,
+        let king_square = self
+            .position
+            .our(Role::King)
+            .first()
+            .expect("king must exist");
+
+        // During recovery no human move is in progress, so
+        // lifted piece, captures, and check are not meaningful.
+        if in_recovery {
+            GameState {
+                lifted_piece: None,
+                captured_piece: None,
+                checkers: Bitboard::EMPTY,
+                king_square,
+                move_guidance,
+                outcome,
+                legal_moves,
+                human_move: played,
+            }
+        } else {
+            GameState {
+                lifted_piece: Self::resolve_lifted_piece(&legal_moves, lifted),
+                captured_piece: captured.single_square(),
+                checkers: self.position.checkers(),
+                king_square,
+                move_guidance,
+                outcome,
+                legal_moves,
+                human_move: played,
+            }
         }
     }
 
@@ -234,6 +300,7 @@ impl GameEngine {
         if current == self.last_positions {
             return None;
         }
+        self.last_positions = current;
 
         let turn = self.position.turn();
         let expected_our = self.position.board().by_color(turn);
@@ -241,9 +308,6 @@ impl GameEngine {
 
         // Pieces of our color that are newly placed relative to the game's expected state.
         let our_placed = our_current & !expected_our;
-
-        // Update last_positions
-        self.last_positions = current;
 
         // Wait until our piece is placed before processing moves.
         if our_placed.is_empty() {
@@ -723,5 +787,123 @@ mod tests {
         assert_piece(&engine, "c3", Role::Pawn, Color::Black);
         assert_empty(&engine, "d4");
         assert_empty(&engine, "c4");
+    }
+
+    mod apply_opponent_move {
+        use super::*;
+
+        fn setup_for_black_move() -> GameEngine {
+            // After 1. e4, it's black's turn
+            GameEngine::from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1")
+        }
+
+        #[test]
+        fn rejects_illegal_move() {
+            let mut engine = setup_for_black_move();
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E2,
+                capture: None,
+                to: Square::E4,
+                promotion: None,
+            };
+
+            let result = engine.apply_opponent_move(&mv);
+            assert!(matches!(result, Err(OpponentMoveError::IllegalMove)));
+        }
+
+        #[test]
+        fn advances_position_after_apply() {
+            let mut engine = setup_for_black_move();
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E7,
+                capture: None,
+                to: Square::E5,
+                promotion: None,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+
+            assert_eq!(engine.turn(), Color::White);
+            assert_piece(&engine, "e5", Role::Pawn, Color::Black);
+            assert_empty(&engine, "e7");
+        }
+
+        #[test]
+        fn expected_positions_match_post_move_board() {
+            let mut engine = setup_for_black_move();
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E7,
+                capture: None,
+                to: Square::E5,
+                promotion: None,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+
+            let expected = engine.expected_positions();
+            let board = engine.position().board();
+            assert_eq!(expected.white, board.by_color(Color::White));
+            assert_eq!(expected.black, board.by_color(Color::Black));
+        }
+    }
+
+    mod opponent_move_recovery {
+        use super::*;
+
+        /// Set up after 1. e4, apply black's e5 as opponent move, return engine
+        /// and a sensor reflecting the pre-move physical board (pawn on e7, not e5).
+        fn engine_with_opponent_normal_move() -> (GameEngine, ScriptedSensor) {
+            let mut engine =
+                GameEngine::from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
+            let pre_move_board = engine.expected_positions();
+            engine.tick(pre_move_board);
+
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E7,
+                capture: None,
+                to: Square::E5,
+                promotion: None,
+            };
+            engine.apply_opponent_move(&mv).unwrap();
+
+            let sensor = ScriptedSensor::from_bitboards(pre_move_board.white, pre_move_board.black)
+                .expect("board positions cannot overlap");
+            (engine, sensor)
+        }
+
+        #[test]
+        fn tick_does_not_detect_lifted_for_opponent_pieces() {
+            let (mut engine, sensor) = engine_with_opponent_normal_move();
+
+            // After opponent move (e7→e5), it's white's turn.
+            // tick() only reports lifted pieces for the current side (white).
+            // Black's e7 pawn missing from physical doesn't trigger lifted_piece.
+            let state = engine.tick(sensor.read_positions());
+            assert!(state.lifted_piece.is_none());
+        }
+
+        #[test]
+        fn human_can_play_after_opponent_move_reconciled() {
+            let (mut engine, mut sensor) = engine_with_opponent_normal_move();
+
+            // Complete the physical move: e7→e5
+            sensor.push_script("e7 Be5.").unwrap();
+            let physical = sensor.tick().unwrap().expect("script produces positions");
+            engine.tick(physical);
+
+            assert_eq!(engine.turn(), Color::White);
+
+            // Human plays d2→d4
+            sensor.push_script("d2 Wd4.").unwrap();
+            let physical = sensor.tick().unwrap().expect("script produces positions");
+            engine.tick(physical);
+
+            assert_piece(&engine, "d4", Role::Pawn, Color::White);
+            assert_empty(&engine, "d2");
+        }
     }
 }

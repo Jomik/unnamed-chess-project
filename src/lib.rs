@@ -2,6 +2,7 @@ use shakmaty::{Bitboard, ByColor};
 
 pub mod feedback;
 pub mod game_logic;
+pub mod opponent;
 pub mod recovery;
 pub mod setup;
 

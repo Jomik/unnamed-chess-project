@@ -5,7 +5,7 @@ use crate::feedback::{BoardFeedback, SquareFeedback};
 /// Compute recovery feedback when the physical board diverges from the game state.
 ///
 /// Returns `None` when the physical board matches. Otherwise highlights:
-/// - `Origin` on squares with unexpected pieces (remove these)
+/// - `Capture` on squares with unexpected pieces (remove these)
 /// - `Destination` on squares missing expected pieces (place pieces here)
 pub fn recovery_feedback(
     expected: &ByColor<Bitboard>,
@@ -16,8 +16,8 @@ pub fn recovery_feedback(
 
     let missing = expected_all & !current_all;
     let extra = current_all & !expected_all;
-
-    if missing.is_empty() && extra.is_empty() {
+    let wrong_color = (expected.white & current.black) | (expected.black & current.white);
+    if missing.is_empty() && extra.is_empty() && wrong_color.is_empty() {
         return None;
     }
 
@@ -26,7 +26,10 @@ pub fn recovery_feedback(
         fb.set(sq, SquareFeedback::Destination);
     }
     for sq in extra {
-        fb.set(sq, SquareFeedback::Origin);
+        fb.set(sq, SquareFeedback::Capture);
+    }
+    for sq in wrong_color {
+        fb.set(sq, SquareFeedback::Capture);
     }
     Some(fb)
 }
@@ -66,7 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn extra_piece_shows_origin() {
+    fn extra_piece_shows_capture() {
         let expected = starting();
         let current = ByColor {
             white: expected.white | Bitboard::from(Square::E4),
@@ -74,7 +77,7 @@ mod tests {
         };
 
         let fb = recovery_feedback(&expected, &current).expect("should have feedback");
-        assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Origin));
+        assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Capture));
         assert_eq!(fb.squares().count(), 1);
     }
 
@@ -88,7 +91,7 @@ mod tests {
 
         let fb = recovery_feedback(&expected, &current).expect("should have feedback");
         assert_eq!(fb.get(Square::E2), Some(SquareFeedback::Destination));
-        assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Origin));
+        assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Capture));
         assert_eq!(fb.squares().count(), 2);
     }
 
@@ -103,6 +106,8 @@ mod tests {
             black: Bitboard::from(Square::E2),
         };
 
-        assert!(recovery_feedback(&expected, &current).is_none());
+        let fb = recovery_feedback(&expected, &current).expect("should detect wrong color");
+        assert_eq!(fb.get(Square::E2), Some(SquareFeedback::Capture));
+        assert_eq!(fb.squares().count(), 1);
     }
 }

@@ -188,7 +188,7 @@ fn show_guidance_step(step: GuidanceStep) -> BoardFeedback {
             fb.set(to, SquareFeedback::Destination);
         }
         GuidanceStep::Remove { square } => {
-            fb.set(square, SquareFeedback::Origin);
+            fb.set(square, SquareFeedback::Capture);
         }
     }
     fb
