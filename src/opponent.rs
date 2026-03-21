@@ -15,7 +15,7 @@ pub trait Opponent {
 /// Simple embedded opponent that picks a move immediately.
 ///
 /// Heuristic: prefer captures (by victim value), then castling,
-/// then queen promotions, then a random non-capture.
+/// then queen promotions, then a random non-king move.
 pub struct EmbeddedEngine {
     pending: Option<Move>,
     rng_state: u32,
@@ -72,7 +72,15 @@ impl Opponent for EmbeddedEngine {
         let promotion = moves.iter().find(|mv| mv.promotion() == Some(Role::Queen));
 
         let random_move = || {
-            let candidates: Vec<_> = moves.iter().filter(|mv| is_allowed(mv)).collect();
+            let non_king: Vec<_> = moves
+                .iter()
+                .filter(|mv| is_allowed(mv) && mv.role() != Role::King)
+                .collect();
+            let candidates = if non_king.is_empty() {
+                moves.iter().filter(|mv| is_allowed(mv)).collect()
+            } else {
+                non_king
+            };
             if candidates.is_empty() {
                 None
             } else {
@@ -142,6 +150,28 @@ mod tests {
         engine.start_thinking(&pos);
         let mv = engine.poll_move().expect("should have a move");
         assert_eq!(mv.promotion(), Some(Role::Queen));
+    }
+
+    #[test]
+    fn avoids_king_moves_when_other_pieces_can_move() {
+        // Black king on g8, knight on f6 — should move the knight, not the king
+        let pos = position_from_fen("6k1/8/5n2/8/8/8/8/4K3 b - - 0 1");
+        let mut engine = EmbeddedEngine::new();
+        for _ in 0..20 {
+            engine.start_thinking(&pos);
+            let mv = engine.poll_move().expect("should have a move");
+            assert_ne!(mv.role(), Role::King);
+        }
+    }
+
+    #[test]
+    fn moves_king_when_only_king_can_move() {
+        // Lone black king — only king moves are legal
+        let pos = position_from_fen("8/8/8/8/8/8/8/k3K3 b - - 0 1");
+        let mut engine = EmbeddedEngine::new();
+        engine.start_thinking(&pos);
+        let mv = engine.poll_move().expect("should have a move");
+        assert_eq!(mv.role(), Role::King);
     }
 
     #[test]

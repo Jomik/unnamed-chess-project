@@ -158,7 +158,7 @@ impl GameEngine {
         let steps = Self::reconciliation_steps(mv, self.position.turn());
 
         let mut after = self.position.clone();
-        after.play_unchecked(mv.clone());
+        after.play_unchecked(*mv);
 
         let expected = ByColor {
             white: after.board().by_color(Color::White),

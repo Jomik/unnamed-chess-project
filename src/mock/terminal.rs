@@ -1,8 +1,9 @@
 use std::io::{self, Write};
 
 use super::ScriptedSensor;
-use crate::feedback::{self, FeedbackSource, SquareFeedback};
+use crate::feedback::{self, FeedbackSource, GuidanceStep, SquareFeedback};
 use crate::game_logic::GameEngine;
+use crate::opponent::{EmbeddedEngine, Opponent};
 use shakmaty::Piece;
 use shakmaty::{
     Bitboard, CastlingMode, Chess, Color, File, Position, Rank, Role, Square, fen::Fen,
@@ -93,6 +94,23 @@ pub fn run_interactive_terminal() {
                 clear_screen();
                 draw_interface(&sensor, &engine, &last_state);
             }
+            "c" => {
+                let mut opponent = EmbeddedEngine::new();
+                opponent.start_thinking(engine.position());
+                match opponent.poll_move() {
+                    Some(mv) => match engine.apply_opponent_move(&mv) {
+                        Ok(()) => {
+                            let positions = sensor.read_positions();
+                            last_state = engine.tick(positions);
+                            clear_screen();
+                            draw_interface(&sensor, &engine, &last_state);
+                            println!("\n🤖 Computer plays: {}", format_move(&mv));
+                        }
+                        Err(e) => println!("❌ {}", e),
+                    },
+                    None => println!("❌ No legal moves available"),
+                }
+            }
             "q" => break,
             _ => {
                 // Treat input as BoardScript
@@ -119,7 +137,7 @@ pub fn run_interactive_terminal() {
 fn draw_interface(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl FeedbackSource) {
     println!("♟️  Chess Board Sensor Simulator");
     println!();
-    println!("Commands: <script> | load <fen> | r (reset) | p (refresh) | q (quit)");
+    println!("Commands: <script> | load <fen> | c (computer) | r (reset) | p (refresh) | q (quit)");
     println!("Script format: e2e4. (toggle squares, '.' to tick)");
     println!();
 
@@ -196,6 +214,15 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
                 .count()
         );
     }
+    if let Some(recon) = engine.reconciliation()
+        && let Some(step) = recon.current_step()
+    {
+        let action = match step {
+            GuidanceStep::Move { from, to } => format!("move {} → {}", from, to),
+            GuidanceStep::Remove { square } => format!("remove piece from {}", square),
+        };
+        println!("\n🤖 Reconciling: {}", action);
+    }
 }
 
 fn piece_symbol(piece: Piece) -> String {
@@ -238,5 +265,46 @@ fn get_game_state_symbol(
         Some(SquareFeedback::Victory) => format!("\x1b[102m {} \x1b[0m", symbol),    // Bright green
         Some(SquareFeedback::Stalemate) => format!("\x1b[103m {} \x1b[0m", symbol), // Bright yellow
         None => format!(" {} ", symbol),
+    }
+}
+
+fn format_move(mv: &shakmaty::Move) -> String {
+    match mv {
+        shakmaty::Move::Normal {
+            role,
+            from,
+            to,
+            capture,
+            promotion,
+        } => {
+            let piece = match role {
+                Role::Pawn => "",
+                Role::Knight => "N",
+                Role::Bishop => "B",
+                Role::Rook => "R",
+                Role::Queen => "Q",
+                Role::King => "K",
+            };
+            let cap = if capture.is_some() { "x" } else { "" };
+            let promo = promotion
+                .map(|r| match r {
+                    Role::Queen => "=Q",
+                    Role::Rook => "=R",
+                    Role::Bishop => "=B",
+                    Role::Knight => "=N",
+                    _ => "",
+                })
+                .unwrap_or("");
+            format!("{}{}{}{}{}", piece, from, cap, to, promo)
+        }
+        shakmaty::Move::Castle { king, rook } => {
+            if rook > king {
+                "O-O".to_string()
+            } else {
+                "O-O-O".to_string()
+            }
+        }
+        shakmaty::Move::EnPassant { from, to } => format!("{}x{} e.p.", from, to),
+        shakmaty::Move::Put { role, to } => format!("{:?}@{}", role, to),
     }
 }
