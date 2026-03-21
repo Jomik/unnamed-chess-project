@@ -9,6 +9,18 @@ pub struct CheckInfo {
     pub checkers: Bitboard,
 }
 
+/// A single physical action the player must perform to complete a move.
+///
+/// Used for multi-step move reconciliation (e.g. castling rook, or future
+/// computer-opponent moves involving captures/en-passant).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GuidanceStep {
+    /// Move a piece from one square to another (e.g. castling rook).
+    Move { from: Square, to: Square },
+    /// Remove a piece from the board (e.g. captured piece during computer move).
+    Remove { square: Square },
+}
+
 /// Game-over state carrying the information needed for visual feedback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameOutcome {
@@ -121,10 +133,8 @@ pub trait FeedbackSource {
     /// Get check information if the side to move is in check
     fn check_info(&self) -> Option<CheckInfo>;
 
-    /// Move guidance during castling: (piece_origin, piece_target).
-    /// Present when a castle move was executed but a piece hasn't
-    /// physically arrived at its target square yet.
-    fn move_guidance(&self) -> Option<(Square, Square)>;
+    /// Guidance for the next physical action to complete a move in progress.
+    fn move_guidance(&self) -> Option<GuidanceStep>;
 
     /// Game outcome, if the game has ended.
     fn outcome(&self) -> Option<GameOutcome>;
@@ -142,8 +152,8 @@ pub fn compute_feedback(source: &impl FeedbackSource) -> BoardFeedback {
         return show_outcome_feedback(outcome);
     }
 
-    if let Some((origin, target)) = source.move_guidance() {
-        return show_move_guidance(origin, target);
+    if let Some(step) = source.move_guidance() {
+        return show_guidance_step(step);
     }
 
     let captured = source.captured_piece();
@@ -170,11 +180,17 @@ pub fn compute_feedback(source: &impl FeedbackSource) -> BoardFeedback {
     }
 }
 
-/// Show where to place a piece to complete a move in progress
-fn show_move_guidance(origin: Square, target: Square) -> BoardFeedback {
+fn show_guidance_step(step: GuidanceStep) -> BoardFeedback {
     let mut fb = BoardFeedback::new();
-    fb.set(origin, SquareFeedback::Origin);
-    fb.set(target, SquareFeedback::Destination);
+    match step {
+        GuidanceStep::Move { from, to } => {
+            fb.set(from, SquareFeedback::Origin);
+            fb.set(to, SquareFeedback::Destination);
+        }
+        GuidanceStep::Remove { square } => {
+            fb.set(square, SquareFeedback::Origin);
+        }
+    }
     fb
 }
 
@@ -314,7 +330,7 @@ mod tests {
         lifted: Option<Square>,
         captured: Option<Square>,
         check: Option<CheckInfo>,
-        move_guidance: Option<(Square, Square)>,
+        move_guidance: Option<GuidanceStep>,
         outcome: Option<GameOutcome>,
     }
 
@@ -385,7 +401,7 @@ mod tests {
             self.check
         }
 
-        fn move_guidance(&self) -> Option<(Square, Square)> {
+        fn move_guidance(&self) -> Option<GuidanceStep> {
             self.move_guidance
         }
 

@@ -1,4 +1,4 @@
-use crate::feedback::{CheckInfo, FeedbackSource, GameOutcome};
+use crate::feedback::{CheckInfo, FeedbackSource, GameOutcome, GuidanceStep};
 use shakmaty::{
     Bitboard, ByColor, CastlingSide, Chess, Color, EnPassantMode, Move, MoveList, Piece, Position,
     Role, Square, fen::Fen,
@@ -12,10 +12,10 @@ pub struct GameState {
     captured_piece: Option<Square>,
     king_square: Square,
     checkers: Bitboard,
-    /// Move guidance during castling: (piece_origin, piece_target).
-    /// Set when a castle move has been executed but a piece hasn't
+    /// Guidance for the next physical action to complete a move in progress.
+    /// Set when a castle move has been executed but the rook hasn't
     /// physically moved to its target square yet.
-    move_guidance: Option<(Square, Square)>,
+    move_guidance: Option<GuidanceStep>,
     outcome: Option<GameOutcome>,
 }
 
@@ -43,7 +43,7 @@ impl FeedbackSource for GameState {
         }
     }
 
-    fn move_guidance(&self) -> Option<(Square, Square)> {
+    fn move_guidance(&self) -> Option<GuidanceStep> {
         self.move_guidance
     }
 
@@ -142,7 +142,7 @@ impl GameEngine {
 
     /// After a castle move is played, check if the rook still needs to
     /// physically move to its target square.
-    fn castle_rook_guidance(&self, mv: &Move, physical: Bitboard) -> Option<(Square, Square)> {
+    fn castle_rook_guidance(&self, mv: &Move, physical: Bitboard) -> Option<GuidanceStep> {
         match mv {
             Move::Castle { king, rook } => {
                 let side = CastlingSide::from_king_side(*king < *rook);
@@ -151,7 +151,10 @@ impl GameEngine {
                 if physical.contains(rook_target) {
                     None
                 } else {
-                    Some((*rook, rook_target))
+                    Some(GuidanceStep::Move {
+                        from: *rook,
+                        to: rook_target,
+                    })
                 }
             }
             _ => None,
@@ -160,7 +163,7 @@ impl GameEngine {
 
     /// Detect mid-castle: king placed on castle target but the move
     /// hasn't completed because the rook is still on its origin square.
-    fn detect_mid_castle(&self, current: ByColor<Bitboard>) -> Option<(Square, Square)> {
+    fn detect_mid_castle(&self, current: ByColor<Bitboard>) -> Option<GuidanceStep> {
         let turn = self.position.turn();
         let our_current = current[turn];
         let expected_our = self.position.board().by_color(turn);
@@ -172,7 +175,10 @@ impl GameEngine {
                 let king_target = side.king_to(turn);
                 if newly_placed.contains(king_target) {
                     let rook_target = side.rook_to(turn);
-                    return Some((rook, rook_target));
+                    return Some(GuidanceStep::Move {
+                        from: rook,
+                        to: rook_target,
+                    });
                 }
             }
         }
