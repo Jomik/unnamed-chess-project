@@ -2,11 +2,12 @@
 fn main() {
     use esp_idf_svc::hal::adc::oneshot::AdcDriver;
     use esp_idf_svc::hal::peripherals::Peripherals;
-    use shakmaty::{Bitboard, ByColor};
+    use shakmaty::{Bitboard, ByColor, Color};
     use unnamed_chess_project::esp32::config::{LedPalette, SensorConfig};
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor};
-    use unnamed_chess_project::feedback::{BoardFeedback, compute_feedback};
+    use unnamed_chess_project::feedback::{BoardFeedback, FeedbackSource, compute_feedback};
     use unnamed_chess_project::game_logic::GameEngine;
+    use unnamed_chess_project::opponent::{EmbeddedEngine, Opponent};
     use unnamed_chess_project::recovery::recovery_feedback;
     use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
@@ -68,6 +69,7 @@ fn main() {
     }
 
     let mut engine = GameEngine::new();
+    let mut opponent = EmbeddedEngine::new();
     let mut prev = ByColor {
         white: Bitboard::EMPTY,
         black: Bitboard::EMPTY,
@@ -104,6 +106,22 @@ fn main() {
         prev = positions;
 
         let state = engine.tick(positions);
+
+        // When it's black's turn and the board is idle, let the computer play.
+        if engine.turn() == Color::Black
+            && engine.reconciliation().is_none()
+            && state.lifted_piece().is_none()
+            && state.outcome().is_none()
+        {
+            opponent.start_thinking(engine.position());
+            if let Some(mv) = opponent.poll_move() {
+                match engine.apply_opponent_move(&mv) {
+                    Ok(()) => log::info!("Computer plays: {mv}"),
+                    Err(e) => log::warn!("Computer move failed: {e}"),
+                }
+            }
+        }
+
         let feedback = compute_feedback(&state);
 
         // When idle (no move in progress), check if the physical board
