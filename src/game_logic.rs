@@ -4,6 +4,35 @@ use shakmaty::{
     Role, Square, fen::Fen,
 };
 
+/// Tracks multi-step physical reconciliation after a computer opponent move.
+///
+/// Each step is a physical action the human must perform (remove captured piece,
+/// move the computer's piece). Steps are consumed in order as the human completes them.
+#[derive(Debug, Clone)]
+pub struct Reconciliation {
+    steps: Vec<GuidanceStep>,
+    current_step: usize,
+    expected: ByColor<Bitboard>,
+}
+
+impl Reconciliation {
+    pub fn current_step(&self) -> Option<&GuidanceStep> {
+        self.steps.get(self.current_step)
+    }
+
+    pub fn expected(&self) -> &ByColor<Bitboard> {
+        &self.expected
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum OpponentMoveError {
+    #[error("cannot apply opponent move while reconciliation is active")]
+    AlreadyReconciling,
+    #[error("opponent move is not legal in the current position")]
+    IllegalMove,
+}
+
 /// Current game state snapshot for feedback and display
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameState {
@@ -60,6 +89,9 @@ pub struct GameEngine {
 
     /// Last known physical board state from sensors, per color.
     last_positions: ByColor<Bitboard>,
+
+    /// Active reconciliation state for a computer opponent move.
+    reconciliation: Option<Reconciliation>,
 }
 
 impl GameEngine {
@@ -78,6 +110,7 @@ impl GameEngine {
         Self {
             position,
             last_positions,
+            reconciliation: None,
         }
     }
 
@@ -106,6 +139,92 @@ impl GameEngine {
         self.position.turn()
     }
 
+    #[inline]
+    pub fn reconciliation(&self) -> Option<&Reconciliation> {
+        self.reconciliation.as_ref()
+    }
+
+    /// Apply a computer opponent's move, advancing the logical position and
+    /// starting reconciliation so the human can physically execute the steps.
+    pub fn apply_opponent_move(&mut self, mv: &Move) -> Result<(), OpponentMoveError> {
+        if self.reconciliation.is_some() {
+            return Err(OpponentMoveError::AlreadyReconciling);
+        }
+
+        if !self.position.legal_moves().contains(mv) {
+            return Err(OpponentMoveError::IllegalMove);
+        }
+
+        let steps = Self::reconciliation_steps(mv, self.position.turn());
+
+        let mut after = self.position.clone();
+        after.play_unchecked(mv.clone());
+
+        let expected = ByColor {
+            white: after.board().by_color(Color::White),
+            black: after.board().by_color(Color::Black),
+        };
+
+        self.position = after;
+        self.reconciliation = Some(Reconciliation {
+            steps,
+            current_step: 0,
+            expected,
+        });
+
+        Ok(())
+    }
+
+    /// Generate the ordered physical steps for a given move.
+    fn reconciliation_steps(mv: &Move, turn: Color) -> Vec<GuidanceStep> {
+        match mv {
+            Move::Normal {
+                from,
+                to,
+                capture: Some(_),
+                ..
+            } => vec![
+                GuidanceStep::Remove { square: *to },
+                GuidanceStep::Move {
+                    from: *from,
+                    to: *to,
+                },
+            ],
+            Move::Normal { from, to, .. } => vec![GuidanceStep::Move {
+                from: *from,
+                to: *to,
+            }],
+            Move::Castle { king, rook } => {
+                let side = CastlingSide::from_king_side(*king < *rook);
+                let king_target = side.king_to(turn);
+                let rook_target = side.rook_to(turn);
+                vec![
+                    GuidanceStep::Move {
+                        from: *king,
+                        to: king_target,
+                    },
+                    GuidanceStep::Move {
+                        from: *rook,
+                        to: rook_target,
+                    },
+                ]
+            }
+            Move::EnPassant { from, to } => {
+                let captured_square = Square::from_coords(to.file(), from.rank());
+                vec![
+                    GuidanceStep::Remove {
+                        square: captured_square,
+                    },
+                    GuidanceStep::Move {
+                        from: *from,
+                        to: *to,
+                    },
+                ]
+            }
+            Move::Put { .. } => vec![],
+        }
+    }
+
     /// Process a board state reading
     ///
     /// Tracks changes in piece positions and executes legal moves when pieces are placed.
@@ -113,9 +232,35 @@ impl GameEngine {
         let changed = current != self.last_positions;
         self.last_positions = current;
 
+        let current_combined = current.white | current.black;
+
+        if self.reconciliation.is_some() {
+            self.advance_reconciliation(current_combined);
+
+            let move_guidance = self
+                .reconciliation
+                .as_ref()
+                .and_then(|r| r.current_step().copied());
+
+            let outcome = self.compute_outcome();
+
+            return GameState {
+                legal_moves: self.position.legal_moves(),
+                lifted_piece: None,
+                captured_piece: None,
+                checkers: self.position.checkers(),
+                king_square: self
+                    .position
+                    .our(Role::King)
+                    .first()
+                    .expect("king must exist"),
+                move_guidance,
+                outcome,
+            };
+        }
+
         let played = self.process_moves(current, changed);
 
-        let current_combined = current.white | current.black;
         let lifted = self.position.us() & !current_combined;
         let captured = self.position.them() & !current_combined;
 
@@ -150,6 +295,35 @@ impl GameEngine {
                 .expect("king must exist"),
             move_guidance,
             outcome,
+        }
+    }
+
+    /// Check if the current reconciliation step is complete and advance.
+    fn advance_reconciliation(&mut self, physical: Bitboard) {
+        let recon = match &self.reconciliation {
+            Some(r) => r,
+            None => return,
+        };
+
+        let step = match recon.current_step() {
+            Some(s) => s,
+            None => {
+                self.reconciliation = None;
+                return;
+            }
+        };
+
+        let complete = match step {
+            GuidanceStep::Remove { square } => !physical.contains(*square),
+            GuidanceStep::Move { from, to } => !physical.contains(*from) && physical.contains(*to),
+        };
+
+        if complete {
+            let recon = self.reconciliation.as_mut().expect("checked above");
+            recon.current_step += 1;
+            if recon.current_step >= recon.steps.len() {
+                self.reconciliation = None;
+            }
         }
     }
 
@@ -730,5 +904,441 @@ mod tests {
         assert_piece(&engine, "c3", Role::Pawn, Color::Black);
         assert_empty(&engine, "d4");
         assert_empty(&engine, "c4");
+    }
+
+    mod apply_opponent_move {
+        use super::*;
+
+        fn setup_for_black_move() -> GameEngine {
+            // After 1. e4, it's black's turn
+            GameEngine::from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1")
+        }
+
+        #[test]
+        fn normal_move_generates_single_step() {
+            let mut engine = setup_for_black_move();
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E7,
+                capture: None,
+                to: Square::E5,
+                promotion: None,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+
+            let recon = engine.reconciliation().unwrap();
+            assert_eq!(
+                recon.current_step(),
+                Some(&GuidanceStep::Move {
+                    from: Square::E7,
+                    to: Square::E5,
+                })
+            );
+            assert_eq!(recon.steps.len(), 1);
+        }
+
+        #[test]
+        fn capture_generates_remove_then_move() {
+            // Black knight can capture pawn on e4
+            let mut engine = GameEngine::from_fen(
+                "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 2 1",
+            );
+
+            let mv = Move::Normal {
+                role: Role::Knight,
+                from: Square::F6,
+                capture: Some(Role::Pawn),
+                to: Square::E4,
+                promotion: None,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+
+            let recon = engine.reconciliation().unwrap();
+            assert_eq!(recon.steps.len(), 2);
+            assert_eq!(recon.steps[0], GuidanceStep::Remove { square: Square::E4 });
+            assert_eq!(
+                recon.steps[1],
+                GuidanceStep::Move {
+                    from: Square::F6,
+                    to: Square::E4,
+                }
+            );
+        }
+
+        #[test]
+        fn castle_generates_king_and_rook_steps() {
+            // Black can castle kingside
+            let mut engine = GameEngine::from_fen(
+                "rnbqk2r/ppppppbp/5np1/8/4P3/5N2/PPPPBPPP/RNBQK2R b KQkq - 4 3",
+            );
+
+            let mv = Move::Castle {
+                king: Square::E8,
+                rook: Square::H8,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+
+            let recon = engine.reconciliation().unwrap();
+            assert_eq!(recon.steps.len(), 2);
+            assert_eq!(
+                recon.steps[0],
+                GuidanceStep::Move {
+                    from: Square::E8,
+                    to: Square::G8,
+                }
+            );
+            assert_eq!(
+                recon.steps[1],
+                GuidanceStep::Move {
+                    from: Square::H8,
+                    to: Square::F8,
+                }
+            );
+        }
+
+        #[test]
+        fn en_passant_generates_remove_then_move() {
+            // Black pawn on d4 can en-passant capture white pawn that just moved to c4
+            let mut engine = GameEngine::from_fen(
+                "rnbqkbnr/pp1ppppp/8/8/2Pp4/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1",
+            );
+
+            let mv = Move::EnPassant {
+                from: Square::D4,
+                to: Square::C3,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+
+            let recon = engine.reconciliation().unwrap();
+            assert_eq!(recon.steps.len(), 2);
+            assert_eq!(recon.steps[0], GuidanceStep::Remove { square: Square::C4 });
+            assert_eq!(
+                recon.steps[1],
+                GuidanceStep::Move {
+                    from: Square::D4,
+                    to: Square::C3,
+                }
+            );
+        }
+
+        #[test]
+        fn rejects_move_while_reconciling() {
+            let mut engine = setup_for_black_move();
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E7,
+                capture: None,
+                to: Square::E5,
+                promotion: None,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+            let result = engine.apply_opponent_move(&mv);
+
+            assert!(matches!(result, Err(OpponentMoveError::AlreadyReconciling)));
+        }
+
+        #[test]
+        fn rejects_illegal_move() {
+            let mut engine = setup_for_black_move();
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E2,
+                capture: None,
+                to: Square::E4,
+                promotion: None,
+            };
+
+            let result = engine.apply_opponent_move(&mv);
+            assert!(matches!(result, Err(OpponentMoveError::IllegalMove)));
+        }
+
+        #[test]
+        fn advances_position_after_apply() {
+            let mut engine = setup_for_black_move();
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E7,
+                capture: None,
+                to: Square::E5,
+                promotion: None,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+
+            assert_eq!(engine.turn(), Color::White);
+            assert_piece(&engine, "e5", Role::Pawn, Color::Black);
+            assert_empty(&engine, "e7");
+        }
+
+        #[test]
+        fn expected_positions_match_post_move_board() {
+            let mut engine = setup_for_black_move();
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E7,
+                capture: None,
+                to: Square::E5,
+                promotion: None,
+            };
+
+            engine.apply_opponent_move(&mv).unwrap();
+
+            let recon = engine.reconciliation().unwrap();
+            let board = engine.position().board();
+            assert_eq!(recon.expected().white, board.by_color(Color::White));
+            assert_eq!(recon.expected().black, board.by_color(Color::Black));
+        }
+    }
+
+    mod reconciliation_flow {
+        use super::*;
+        use crate::feedback::compute_feedback;
+
+        /// Set up after 1. e4, apply black's e5 as opponent move, return engine
+        /// still showing the pre-move physical board (pawn on e7, not e5).
+        fn engine_with_opponent_normal_move() -> (GameEngine, ByColor<Bitboard>) {
+            let mut engine =
+                GameEngine::from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
+            let pre_move_board = engine.expected_positions();
+            engine.tick(pre_move_board);
+
+            let mv = Move::Normal {
+                role: Role::Pawn,
+                from: Square::E7,
+                capture: None,
+                to: Square::E5,
+                promotion: None,
+            };
+            engine.apply_opponent_move(&mv).unwrap();
+
+            (engine, pre_move_board)
+        }
+
+        #[test]
+        fn tick_shows_guidance_during_reconciliation() {
+            let (mut engine, pre_move_board) = engine_with_opponent_normal_move();
+
+            let state = engine.tick(pre_move_board);
+            assert_eq!(
+                state.move_guidance(),
+                Some(GuidanceStep::Move {
+                    from: Square::E7,
+                    to: Square::E5,
+                })
+            );
+        }
+
+        #[test]
+        fn tick_suppresses_lifted_and_captured_during_reconciliation() {
+            let (mut engine, pre_move_board) = engine_with_opponent_normal_move();
+
+            let state = engine.tick(pre_move_board);
+            assert!(state.lifted_piece.is_none());
+            assert!(state.captured_piece.is_none());
+        }
+
+        #[test]
+        fn normal_move_completes_after_physical_move() {
+            let (mut engine, mut physical) = engine_with_opponent_normal_move();
+
+            // Lift piece from e7
+            physical.black &= !Bitboard::from(Square::E7);
+            engine.tick(physical);
+            assert!(engine.reconciliation().is_some());
+
+            // Place piece on e5
+            physical.black |= Bitboard::from(Square::E5);
+            let state = engine.tick(physical);
+
+            assert!(engine.reconciliation().is_none());
+            assert!(state.move_guidance().is_none());
+        }
+
+        #[test]
+        fn capture_completes_after_remove_then_move() {
+            // Black knight captures white pawn on e4
+            let mut engine = GameEngine::from_fen(
+                "rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 2 1",
+            );
+            let mut physical = engine.expected_positions();
+            engine.tick(physical);
+
+            let mv = Move::Normal {
+                role: Role::Knight,
+                from: Square::F6,
+                capture: Some(Role::Pawn),
+                to: Square::E4,
+                promotion: None,
+            };
+            engine.apply_opponent_move(&mv).unwrap();
+
+            // Step 1: Remove white pawn from e4
+            let state = engine.tick(physical);
+            assert_eq!(
+                state.move_guidance(),
+                Some(GuidanceStep::Remove { square: Square::E4 })
+            );
+
+            physical.white &= !Bitboard::from(Square::E4);
+            let state = engine.tick(physical);
+            assert_eq!(
+                state.move_guidance(),
+                Some(GuidanceStep::Move {
+                    from: Square::F6,
+                    to: Square::E4,
+                })
+            );
+
+            // Step 2: Move knight from f6 to e4
+            physical.black &= !Bitboard::from(Square::F6);
+            physical.black |= Bitboard::from(Square::E4);
+            let state = engine.tick(physical);
+
+            assert!(engine.reconciliation().is_none());
+            assert!(state.move_guidance().is_none());
+        }
+
+        #[test]
+        fn castle_completes_after_king_then_rook() {
+            // Black can castle kingside
+            let mut engine = GameEngine::from_fen(
+                "rnbqk2r/ppppppbp/5np1/8/4P3/5N2/PPPPBPPP/RNBQK2R b KQkq - 4 3",
+            );
+            let mut physical = engine.expected_positions();
+            engine.tick(physical);
+
+            let mv = Move::Castle {
+                king: Square::E8,
+                rook: Square::H8,
+            };
+            engine.apply_opponent_move(&mv).unwrap();
+
+            // Step 1: Move king from e8 to g8
+            let state = engine.tick(physical);
+            assert_eq!(
+                state.move_guidance(),
+                Some(GuidanceStep::Move {
+                    from: Square::E8,
+                    to: Square::G8,
+                })
+            );
+
+            physical.black &= !Bitboard::from(Square::E8);
+            physical.black |= Bitboard::from(Square::G8);
+            let state = engine.tick(physical);
+            assert_eq!(
+                state.move_guidance(),
+                Some(GuidanceStep::Move {
+                    from: Square::H8,
+                    to: Square::F8,
+                })
+            );
+
+            // Step 2: Move rook from h8 to f8
+            physical.black &= !Bitboard::from(Square::H8);
+            physical.black |= Bitboard::from(Square::F8);
+            let state = engine.tick(physical);
+
+            assert!(engine.reconciliation().is_none());
+            assert!(state.move_guidance().is_none());
+        }
+
+        #[test]
+        fn en_passant_completes_after_remove_then_move() {
+            // Black can en-passant capture on c3
+            let mut engine = GameEngine::from_fen(
+                "rnbqkbnr/pp1ppppp/8/8/2Pp4/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1",
+            );
+            let mut physical = engine.expected_positions();
+            engine.tick(physical);
+
+            let mv = Move::EnPassant {
+                from: Square::D4,
+                to: Square::C3,
+            };
+            engine.apply_opponent_move(&mv).unwrap();
+
+            // Step 1: Remove captured pawn from c4
+            let state = engine.tick(physical);
+            assert_eq!(
+                state.move_guidance(),
+                Some(GuidanceStep::Remove { square: Square::C4 })
+            );
+
+            physical.white &= !Bitboard::from(Square::C4);
+            let state = engine.tick(physical);
+            assert_eq!(
+                state.move_guidance(),
+                Some(GuidanceStep::Move {
+                    from: Square::D4,
+                    to: Square::C3,
+                })
+            );
+
+            // Step 2: Move pawn from d4 to c3
+            physical.black &= !Bitboard::from(Square::D4);
+            physical.black |= Bitboard::from(Square::C3);
+            let state = engine.tick(physical);
+
+            assert!(engine.reconciliation().is_none());
+            assert!(state.move_guidance().is_none());
+        }
+
+        #[test]
+        fn human_can_play_after_reconciliation_completes() {
+            let (mut engine, mut physical) = engine_with_opponent_normal_move();
+
+            // Complete reconciliation: move e7→e5
+            physical.black &= !Bitboard::from(Square::E7);
+            physical.black |= Bitboard::from(Square::E5);
+            engine.tick(physical);
+            assert!(engine.reconciliation().is_none());
+            assert_eq!(engine.turn(), Color::White);
+
+            // Human plays d2→d4
+            physical.white &= !Bitboard::from(Square::D2);
+            physical.white |= Bitboard::from(Square::D4);
+            engine.tick(physical);
+
+            assert_piece(&engine, "d4", Role::Pawn, Color::White);
+            assert_empty(&engine, "d2");
+        }
+
+        #[test]
+        fn reconciliation_persists_until_step_completed() {
+            let (mut engine, physical) = engine_with_opponent_normal_move();
+
+            // Tick multiple times without changing physical board
+            for _ in 0..5 {
+                engine.tick(physical);
+            }
+
+            assert!(engine.reconciliation().is_some());
+            assert_eq!(
+                engine.reconciliation().unwrap().current_step(),
+                Some(&GuidanceStep::Move {
+                    from: Square::E7,
+                    to: Square::E5,
+                })
+            );
+        }
+
+        #[test]
+        fn feedback_shows_guidance_squares_during_reconciliation() {
+            let (mut engine, physical) = engine_with_opponent_normal_move();
+
+            let state = engine.tick(physical);
+            let feedback = compute_feedback(&state);
+
+            assert!(
+                feedback.get(Square::E7).is_some() || feedback.get(Square::E5).is_some(),
+                "Feedback should show guidance for the move step"
+            );
+        }
     }
 }
