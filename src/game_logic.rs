@@ -106,28 +106,16 @@ impl GameEngine {
         let lifted = self.position.us() & !current_combined;
         let captured = self.position.them() & !current_combined;
 
+        let legal_moves = self.position.legal_moves();
+
         let move_guidance = played
             .and_then(|mv| self.castle_rook_guidance(&mv, current_combined))
-            .or_else(|| self.detect_mid_castle(current));
+            .or_else(|| self.detect_mid_castle(current, &legal_moves));
 
-        let outcome = self.compute_outcome();
-
-        // When both king and rook are lifted for castling, report the
-        // king's origin so feedback can show castle destinations.
-        let lifted_piece = lifted.single_square().or_else(|| {
-            if lifted.count() != 2 {
-                return None;
-            }
-            self.position
-                .legal_moves()
-                .iter()
-                .find(|mv| matches!(mv, Move::Castle { king, rook } if lifted.contains(*king) && lifted.contains(*rook)))
-                .and_then(|mv| mv.from())
-        });
+        let outcome = Self::compute_outcome(&self.position, &legal_moves);
 
         GameState {
-            legal_moves: self.position.legal_moves(),
-            lifted_piece,
+            lifted_piece: Self::resolve_lifted_piece(&legal_moves, lifted),
             captured_piece: captured.single_square(),
             checkers: self.position.checkers(),
             king_square: self
@@ -137,7 +125,25 @@ impl GameEngine {
                 .expect("king must exist"),
             move_guidance,
             outcome,
+            legal_moves,
         }
+    }
+
+    /// Resolve which square to report as the lifted piece.
+    ///
+    /// Single lifted piece → that square. Two lifted pieces that match
+    /// a castling move (king + rook) → the king's origin, so feedback
+    /// can show castle destinations. Everything else → None.
+    fn resolve_lifted_piece(legal_moves: &MoveList, lifted: Bitboard) -> Option<Square> {
+        lifted.single_square().or_else(|| {
+            if lifted.count() != 2 {
+                return None;
+            }
+            legal_moves
+                .iter()
+                .find(|mv| matches!(mv, Move::Castle { king, rook } if lifted.contains(*king) && lifted.contains(*rook)))
+                .and_then(|mv| mv.from())
+        })
     }
 
     /// After a castle move is played, check if the rook still needs to
@@ -163,14 +169,18 @@ impl GameEngine {
 
     /// Detect mid-castle: king placed on castle target but the move
     /// hasn't completed because the rook is still on its origin square.
-    fn detect_mid_castle(&self, current: ByColor<Bitboard>) -> Option<GuidanceStep> {
+    fn detect_mid_castle(
+        &self,
+        current: ByColor<Bitboard>,
+        legal_moves: &MoveList,
+    ) -> Option<GuidanceStep> {
         let turn = self.position.turn();
         let our_current = current[turn];
         let expected_our = self.position.board().by_color(turn);
         let newly_placed = our_current & !expected_our;
 
-        for mv in self.position.legal_moves() {
-            if let Move::Castle { king, rook } = mv {
+        for mv in legal_moves {
+            if let Move::Castle { king, rook } = *mv {
                 let side = CastlingSide::from_king_side(king < rook);
                 let king_target = side.king_to(turn);
                 if newly_placed.contains(king_target) {
@@ -186,36 +196,29 @@ impl GameEngine {
     }
 
     /// Compute game outcome from the current position.
-    fn compute_outcome(&self) -> Option<GameOutcome> {
-        if !self.position.legal_moves().is_empty() {
+    fn compute_outcome(position: &Chess, legal_moves: &MoveList) -> Option<GameOutcome> {
+        if !legal_moves.is_empty() {
             return None;
         }
 
-        if self.position.is_check() {
-            // The side to move is checkmated (they have no escape).
-            let king_square = self
-                .position
-                .our(Role::King)
-                .first()
-                .expect("king must exist");
+        if position.is_check() {
+            let king_square = position.our(Role::King).first().expect("king must exist");
             Some(GameOutcome::Checkmate {
                 king_square,
-                checkers: self.position.checkers(),
-                loser: self.position.turn(),
+                checkers: position.checkers(),
+                loser: position.turn(),
             })
         } else {
-            let white_king = self
-                .position
+            let white_king = position
                 .board()
                 .by_role(Role::King)
-                .intersect(self.position.board().by_color(Color::White))
+                .intersect(position.board().by_color(Color::White))
                 .first()
                 .expect("white king must exist");
-            let black_king = self
-                .position
+            let black_king = position
                 .board()
                 .by_role(Role::King)
-                .intersect(self.position.board().by_color(Color::Black))
+                .intersect(position.board().by_color(Color::Black))
                 .first()
                 .expect("black king must exist");
             Some(GameOutcome::Stalemate {

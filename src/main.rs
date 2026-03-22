@@ -90,16 +90,16 @@ fn main() {
         let black_removed = prev.black & !positions.black;
 
         for sq in white_added {
-            log::info!("+ {sq} white");
+            log::debug!("+ {sq} white");
         }
         for sq in white_removed {
-            log::info!("- {sq} white");
+            log::debug!("- {sq} white");
         }
         for sq in black_added {
-            log::info!("+ {sq} black");
+            log::debug!("+ {sq} black");
         }
         for sq in black_removed {
-            log::info!("- {sq} black");
+            log::debug!("- {sq} black");
         }
         prev = positions;
 
