@@ -1,9 +1,10 @@
 use std::io::{self, Write};
 
 use super::ScriptedSensor;
-use crate::feedback::{self, FeedbackSource, SquareFeedback};
+use crate::feedback::{BoardFeedback, FeedbackSource, SquareFeedback};
 use crate::game_logic::GameEngine;
-use crate::recovery::recovery_feedback;
+use crate::opponent::EmbeddedEngine;
+use crate::session::{GameSession, TickResult};
 use shakmaty::Piece;
 use shakmaty::{
     Bitboard, CastlingMode, Chess, Color, File, Position, Rank, Role, Square, fen::Fen,
@@ -20,12 +21,12 @@ fn clear_screen() {
 /// Displays raw sensor state alongside interpreted game state.
 pub fn run_interactive_terminal() {
     let mut sensor = ScriptedSensor::new();
-    let mut engine = GameEngine::new();
+    let mut session = GameSession::with_opponent(Box::new(EmbeddedEngine::new(42)));
     let positions = sensor.read_positions();
-    let mut last_state = engine.tick(positions);
+    let mut last_result = session.process_positions(positions);
 
     clear_screen();
-    draw_interface(&sensor, &engine, &last_state);
+    draw_interface(&sensor, session.engine(), &last_result);
 
     loop {
         print!("> ");
@@ -67,11 +68,14 @@ pub fn run_interactive_terminal() {
                                         board.by_color(Color::Black),
                                     )
                                     .expect("board positions cannot overlap");
-                                engine = GameEngine::from_position(chess);
+                                session = GameSession::from_position_with_opponent(
+                                    chess,
+                                    Box::new(EmbeddedEngine::new(42)),
+                                );
                                 let positions = sensor.read_positions();
-                                last_state = engine.tick(positions);
+                                last_result = session.process_positions(positions);
                                 clear_screen();
-                                draw_interface(&sensor, &engine, &last_state);
+                                draw_interface(&sensor, session.engine(), &last_result);
                                 println!("\n✅ Position loaded from FEN");
                             } else {
                                 println!("❌ Invalid FEN setup");
@@ -83,29 +87,29 @@ pub fn run_interactive_terminal() {
             }
             "r" => {
                 sensor = ScriptedSensor::new();
-                engine = GameEngine::new();
+                session = GameSession::with_opponent(Box::new(EmbeddedEngine::new(42)));
                 let positions = sensor.read_positions();
-                last_state = engine.tick(positions);
+                last_result = session.process_positions(positions);
                 clear_screen();
-                draw_interface(&sensor, &engine, &last_state);
+                draw_interface(&sensor, session.engine(), &last_result);
                 println!("\n🔄 Reset to initial state");
             }
             "p" => {
                 clear_screen();
-                draw_interface(&sensor, &engine, &last_state);
+                draw_interface(&sensor, session.engine(), &last_result);
             }
             "q" => break,
             _ => {
                 // Treat input as BoardScript
                 let result = sensor.push_script(&input).and_then(|()| {
                     sensor.drain(|p| {
-                        last_state = engine.tick(p);
+                        last_result = session.process_positions(p);
                     })
                 });
                 match result {
                     Ok(()) => {
                         clear_screen();
-                        draw_interface(&sensor, &engine, &last_state);
+                        draw_interface(&sensor, session.engine(), &last_result);
                     }
                     Err(e) => {
                         println!("❌ {}", e);
@@ -117,26 +121,20 @@ pub fn run_interactive_terminal() {
 }
 
 /// Draws the complete interface: help text and dual boards.
-fn draw_interface(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl FeedbackSource) {
+fn draw_interface(sensor: &ScriptedSensor, engine: &GameEngine, result: &TickResult) {
     println!("♟️  Chess Board Sensor Simulator");
     println!();
     println!("Commands: <script> | load <fen> | r (reset) | p (refresh) | q (quit)");
     println!("Script format: e2e4. (toggle squares, '.' to tick)");
     println!();
 
-    draw_dual_boards(sensor, engine, state);
+    draw_dual_boards(sensor, engine, result);
 }
 
 /// Draws both boards side-by-side: raw sensors (left) and game state (right).
-fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl FeedbackSource) {
+fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, result: &TickResult) {
     let sensor_positions = sensor.read_positions();
     let sensor_bb = sensor_positions.white | sensor_positions.black;
-    let feedback = feedback::compute_feedback(state);
-    let feedback = if feedback.is_empty() {
-        recovery_feedback(&engine.expected_positions(), &sensor_positions).unwrap_or(feedback)
-    } else {
-        feedback
-    };
 
     println!("╔═════════════════════════════╦═════════════════════════════╗");
     println!("║       Raw Sensors           ║       Game State            ║");
@@ -164,7 +162,7 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
         print!(" {} ║", rank.char());
         for file in File::ALL {
             let square = Square::from_coords(file, *rank);
-            let symbol = get_game_state_symbol(square, sensor_bb, engine, &feedback);
+            let symbol = get_game_state_symbol(square, sensor_bb, engine, &result.feedback);
             print!("{}", symbol);
         }
 
@@ -182,21 +180,23 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
     );
 
     // Show lifted piece info
-    if let Some(lifted_square) = state.lifted_piece() {
+    if let Some(lifted_square) = result.state.lifted_piece() {
         println!("\n🔵 Lifted: {}", lifted_square);
         println!(
             "   Legal destinations: {}",
-            feedback
+            result
+                .feedback
                 .squares()
                 .filter(|(_, t)| matches!(t, SquareFeedback::Destination | SquareFeedback::Capture))
                 .count()
         );
     }
-    if let Some(captured_square) = state.captured_piece() {
+    if let Some(captured_square) = result.state.captured_piece() {
         println!("\n🔴 Captured: {}", captured_square);
         println!(
             "   Legal captors: {}",
-            feedback
+            result
+                .feedback
                 .squares()
                 .filter(|(_, t)| matches!(t, SquareFeedback::Origin))
                 .count()
@@ -224,7 +224,7 @@ fn get_game_state_symbol(
     square: Square,
     sensor_bb: Bitboard,
     engine: &GameEngine,
-    feedback: &feedback::BoardFeedback,
+    feedback: &BoardFeedback,
 ) -> String {
     let has_sensor = sensor_bb.contains(square);
 

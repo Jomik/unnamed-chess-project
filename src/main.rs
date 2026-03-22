@@ -5,10 +5,9 @@ fn main() {
     use shakmaty::{Bitboard, ByColor};
     use unnamed_chess_project::esp32::config::{LedPalette, SensorConfig};
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor};
-    use unnamed_chess_project::feedback::{BoardFeedback, compute_feedback};
-    use unnamed_chess_project::game_logic::GameEngine;
-    use unnamed_chess_project::opponent::{EmbeddedEngine, Opponent};
-    use unnamed_chess_project::recovery::recovery_feedback;
+    use unnamed_chess_project::feedback::BoardFeedback;
+    use unnamed_chess_project::opponent::EmbeddedEngine;
+    use unnamed_chess_project::session::GameSession;
     use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
 
@@ -68,8 +67,8 @@ fn main() {
         log::warn!("LED clear failed: {e}");
     }
 
-    let mut engine = GameEngine::new();
-    let mut opponent = EmbeddedEngine::new(unsafe { esp_idf_svc::sys::esp_random() });
+    let opponent = EmbeddedEngine::new(unsafe { esp_idf_svc::sys::esp_random() });
+    let mut session = GameSession::with_opponent(Box::new(opponent));
     let mut prev = ByColor {
         white: Bitboard::EMPTY,
         black: Bitboard::EMPTY,
@@ -105,30 +104,16 @@ fn main() {
         }
         prev = positions;
 
-        let state = engine.tick(positions);
+        let result = session.process_positions(positions);
 
-        if let Some(mv) = state.human_move() {
+        if let Some(mv) = result.state.human_move() {
             log::info!("Human plays: {mv}");
-            opponent.start_thinking(engine.position(), mv);
-            if let Some(reply) = opponent.poll_move() {
-                match engine.apply_opponent_move(&reply) {
-                    Ok(()) => log::info!("Computer plays: {reply}"),
-                    Err(e) => log::warn!("Computer move failed: {e}"),
-                }
-            }
+        }
+        if let Some(mv) = &result.computer_move {
+            log::info!("Computer plays: {mv}");
         }
 
-        let feedback = compute_feedback(&state);
-
-        // When idle (no move in progress), check if the physical board
-        // diverges from the game state and guide the user to fix it.
-        let feedback = if feedback.is_empty() {
-            recovery_feedback(&engine.expected_positions(), &positions).unwrap_or(feedback)
-        } else {
-            feedback
-        };
-
-        if let Err(e) = display.show(&feedback) {
+        if let Err(e) = display.show(&result.feedback) {
             log::warn!("LED update failed: {e}");
         }
 

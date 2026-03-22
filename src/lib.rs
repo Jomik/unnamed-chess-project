@@ -4,6 +4,7 @@ pub mod feedback;
 pub mod game_logic;
 pub mod opponent;
 pub mod recovery;
+pub mod session;
 pub mod setup;
 
 /// Trait for reading piece positions from the board.
