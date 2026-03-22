@@ -59,6 +59,14 @@ pub enum SquareFeedback {
     Stalemate,
 }
 
+/// Non-game status indication (e.g. WiFi connecting, success, failure).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusKind {
+    Pending,
+    Success,
+    Failure,
+}
+
 /// Contains the set of squares and their associated feedback types for the current board state.
 ///
 /// `BoardFeedback` is computed by `compute_feedback()` and consumed by LED drivers or terminal
@@ -68,6 +76,7 @@ pub enum SquareFeedback {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoardFeedback {
     squares: [Option<SquareFeedback>; 64],
+    status: Option<StatusKind>,
 }
 
 impl BoardFeedback {
@@ -76,7 +85,20 @@ impl BoardFeedback {
     pub const fn new() -> Self {
         Self {
             squares: [None; 64],
+            status: None,
         }
+    }
+
+    pub const fn with_status(kind: StatusKind) -> Self {
+        Self {
+            squares: [None; 64],
+            status: Some(kind),
+        }
+    }
+
+    #[inline]
+    pub fn status(&self) -> Option<StatusKind> {
+        self.status
     }
 
     /// Get all square feedback entries as (Square, SquareFeedback) pairs
@@ -104,10 +126,10 @@ impl BoardFeedback {
 
     /// Check if any feedback exists
     ///
-    /// Returns true if there are no feedback squares to display.
+    /// Returns true if there are no feedback squares or status to display.
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.squares.iter().all(|s| s.is_none())
+        self.status.is_none() && self.squares.iter().all(|s| s.is_none())
     }
 }
 
@@ -417,6 +439,35 @@ mod tests {
         let feedback = compute_feedback(&source);
 
         assert_eq!(feedback.squares().count(), 0);
+        assert!(feedback.is_empty());
+    }
+
+    #[test]
+    fn test_with_status_returns_status() {
+        let feedback = BoardFeedback::with_status(StatusKind::Pending);
+        assert_eq!(feedback.status(), Some(StatusKind::Pending));
+        assert_eq!(feedback.squares().count(), 0);
+
+        let feedback = BoardFeedback::with_status(StatusKind::Success);
+        assert_eq!(feedback.status(), Some(StatusKind::Success));
+
+        let feedback = BoardFeedback::with_status(StatusKind::Failure);
+        assert_eq!(feedback.status(), Some(StatusKind::Failure));
+    }
+
+    #[test]
+    fn test_status_feedback_is_not_empty() {
+        let feedback = BoardFeedback::with_status(StatusKind::Pending);
+        assert!(
+            !feedback.is_empty(),
+            "status-only feedback should not be empty"
+        );
+    }
+
+    #[test]
+    fn test_default_feedback_has_no_status() {
+        let feedback = BoardFeedback::default();
+        assert_eq!(feedback.status(), None);
         assert!(feedback.is_empty());
     }
 

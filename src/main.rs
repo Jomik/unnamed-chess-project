@@ -1,11 +1,14 @@
 #[cfg(target_os = "espidf")]
 fn main() {
+    use esp_idf_svc::eventloop::EspSystemEventLoop;
     use esp_idf_svc::hal::adc::oneshot::AdcDriver;
+    use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
+    use esp_idf_svc::nvs::EspDefaultNvsPartition;
     use shakmaty::{Bitboard, ByColor};
     use unnamed_chess_project::esp32::config::{LedPalette, SensorConfig};
-    use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor};
-    use unnamed_chess_project::feedback::BoardFeedback;
+    use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, WifiConnection};
+    use unnamed_chess_project::feedback::{BoardFeedback, StatusKind};
     use unnamed_chess_project::opponent::EmbeddedEngine;
     use unnamed_chess_project::session::GameSession;
     use unnamed_chess_project::setup::setup_feedback;
@@ -15,6 +18,42 @@ fn main() {
     esp_idf_svc::log::EspLogger::initialize_default();
 
     let peripherals = Peripherals::take().expect("failed to take peripherals");
+    let sys_loop = EspSystemEventLoop::take().expect("failed to take event loop");
+    let nvs = EspDefaultNvsPartition::take().expect("failed to take NVS partition");
+
+    let mut display = Esp32LedDisplay::new(peripherals.pins.gpio2, LedPalette::default())
+        .expect("failed to init LED display");
+
+    if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Pending)) {
+        log::warn!("LED update failed: {e}");
+    }
+    let _wifi = match WifiConnection::connect(
+        peripherals.modem,
+        sys_loop,
+        nvs,
+        env!("WIFI_SSID"),
+        env!("WIFI_PASSWORD"),
+    ) {
+        Ok(wifi) => {
+            log::info!("WiFi connected");
+            if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Success)) {
+                log::warn!("LED update failed: {e}");
+            }
+            FreeRtos::delay_ms(500);
+            Some(wifi)
+        }
+        Err(e) => {
+            log::warn!("WiFi failed: {e} — continuing without network");
+            if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Failure)) {
+                log::warn!("LED update failed: {e}");
+            }
+            FreeRtos::delay_ms(500);
+            None
+        }
+    };
+    if let Err(e) = display.show(&BoardFeedback::default()) {
+        log::warn!("LED update failed: {e}");
+    }
 
     let adc_driver = AdcDriver::new(peripherals.adc1).expect("failed to init ADC1");
 
@@ -35,9 +74,6 @@ fn main() {
         },
     )
     .expect("failed to init sensor");
-
-    let mut display = Esp32LedDisplay::new(peripherals.pins.gpio2, LedPalette::default())
-        .expect("failed to init LED display");
 
     log::info!("Waiting for starting position...");
     loop {
