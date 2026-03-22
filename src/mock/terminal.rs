@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use super::ScriptedSensor;
 use crate::feedback::{self, FeedbackSource, SquareFeedback};
 use crate::game_logic::GameEngine;
+use crate::recovery::recovery_feedback;
 use shakmaty::Piece;
 use shakmaty::{
     Bitboard, CastlingMode, Chess, Color, File, Position, Rank, Role, Square, fen::Fen,
@@ -131,6 +132,11 @@ fn draw_dual_boards(sensor: &ScriptedSensor, engine: &GameEngine, state: &impl F
     let sensor_positions = sensor.read_positions();
     let sensor_bb = sensor_positions.white | sensor_positions.black;
     let feedback = feedback::compute_feedback(state);
+    let feedback = if feedback.is_empty() {
+        recovery_feedback(&engine.expected_positions(), &sensor_positions).unwrap_or(feedback)
+    } else {
+        feedback
+    };
 
     println!("╔═════════════════════════════╦═════════════════════════════╗");
     println!("║       Raw Sensors           ║       Game State            ║");

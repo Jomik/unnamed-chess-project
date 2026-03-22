@@ -7,6 +7,7 @@ fn main() {
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor};
     use unnamed_chess_project::feedback::{BoardFeedback, compute_feedback};
     use unnamed_chess_project::game_logic::GameEngine;
+    use unnamed_chess_project::opponent::{EmbeddedEngine, Opponent};
     use unnamed_chess_project::recovery::recovery_feedback;
     use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
@@ -68,6 +69,7 @@ fn main() {
     }
 
     let mut engine = GameEngine::new();
+    let mut opponent = EmbeddedEngine::new(unsafe { esp_idf_svc::sys::esp_random() });
     let mut prev = ByColor {
         white: Bitboard::EMPTY,
         black: Bitboard::EMPTY,
@@ -104,6 +106,18 @@ fn main() {
         prev = positions;
 
         let state = engine.tick(positions);
+
+        if let Some(mv) = state.human_move() {
+            log::info!("Human plays: {mv}");
+            opponent.start_thinking(engine.position(), mv);
+            if let Some(reply) = opponent.poll_move() {
+                match engine.apply_opponent_move(&reply) {
+                    Ok(()) => log::info!("Computer plays: {reply}"),
+                    Err(e) => log::warn!("Computer move failed: {e}"),
+                }
+            }
+        }
+
         let feedback = compute_feedback(&state);
 
         // When idle (no move in progress), check if the physical board

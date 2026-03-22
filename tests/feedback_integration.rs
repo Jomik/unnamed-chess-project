@@ -1,9 +1,10 @@
 #![cfg(not(target_os = "espidf"))]
 
-use shakmaty::{CastlingMode, Chess, Color, Position, Role, Square, fen::Fen};
+use shakmaty::{CastlingMode, Chess, Color, Move, Position, Role, Square, fen::Fen};
 use unnamed_chess_project::feedback::{SquareFeedback, compute_feedback};
 use unnamed_chess_project::game_logic::GameEngine;
 use unnamed_chess_project::mock::ScriptedSensor;
+use unnamed_chess_project::recovery::recovery_feedback;
 
 /// Helper: create engine + sensor from the default starting position.
 fn setup() -> (GameEngine, ScriptedSensor) {
@@ -622,4 +623,193 @@ fn stalemate_shows_both_kings() {
     assert_eq!(fb.get(Square::A1), Some(SquareFeedback::Stalemate));
     assert_eq!(fb.get(Square::H1), Some(SquareFeedback::Stalemate));
     assert_eq!(fb.get(Square::H8), Some(SquareFeedback::Stalemate));
+}
+
+// ---------------------------------------------------------------
+// Opponent-move recovery: feedback after computer plays
+// ---------------------------------------------------------------
+
+/// Set up after 1. e4, apply black's e5 as opponent move, return engine
+/// and a sensor reflecting the pre-move physical board (pawn on e7, not e5).
+fn engine_with_opponent_normal_move() -> (GameEngine, ScriptedSensor) {
+    let (mut engine, sensor) =
+        setup_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
+    engine.tick(sensor.read_positions());
+
+    let mv = Move::Normal {
+        role: Role::Pawn,
+        from: Square::E7,
+        capture: None,
+        to: Square::E5,
+        promotion: None,
+    };
+    engine.apply_opponent_move(&mv).unwrap();
+
+    (engine, sensor)
+}
+
+#[test]
+fn opponent_move_recovery_shows_diff() {
+    let (engine, sensor) = engine_with_opponent_normal_move();
+
+    let fb = recovery_feedback(&engine.expected_positions(), &sensor.read_positions())
+        .expect("should show diff");
+
+    // e7 has a piece physically but expected is empty → extra (Capture)
+    assert_eq!(
+        fb.get(Square::E7),
+        Some(SquareFeedback::Capture),
+        "extra piece on e7 should show Capture"
+    );
+    // e5 is empty physically but expected has a piece → missing (Destination)
+    assert_eq!(
+        fb.get(Square::E5),
+        Some(SquareFeedback::Destination),
+        "missing piece on e5 should show Destination"
+    );
+}
+
+#[test]
+fn opponent_move_recovery_clears_after_physical_matches() {
+    let (engine, mut sensor) = engine_with_opponent_normal_move();
+
+    // Move the physical piece from e7 to e5
+    sensor.push_script("e7 Be5.").unwrap();
+    let physical = sensor.tick().unwrap().expect("script produces positions");
+
+    let fb = recovery_feedback(&engine.expected_positions(), &physical);
+    assert!(fb.is_none(), "recovery should be None when board matches");
+}
+
+#[test]
+fn opponent_move_recovery_persists_until_board_matches() {
+    let (engine, sensor) = engine_with_opponent_normal_move();
+
+    // Without changing the physical board, recovery keeps showing the diff
+    for _ in 0..5 {
+        let fb = recovery_feedback(&engine.expected_positions(), &sensor.read_positions());
+        assert!(fb.is_some(), "recovery should persist while board differs");
+    }
+}
+
+#[test]
+fn opponent_move_no_false_compute_feedback() {
+    let (mut engine, sensor) = engine_with_opponent_normal_move();
+
+    let state = engine.tick(sensor.read_positions());
+    let feedback = compute_feedback(&state);
+
+    assert!(
+        feedback.is_empty(),
+        "compute_feedback should be empty during recovery"
+    );
+}
+
+#[test]
+fn opponent_capture_shows_extra_and_missing() {
+    // Black knight captures white pawn on e4
+    let (mut engine, sensor) =
+        setup_fen("rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 2 1");
+    engine.tick(sensor.read_positions());
+
+    let mv = Move::Normal {
+        role: Role::Knight,
+        from: Square::F6,
+        capture: Some(Role::Pawn),
+        to: Square::E4,
+        promotion: None,
+    };
+    engine.apply_opponent_move(&mv).unwrap();
+
+    let fb = recovery_feedback(&engine.expected_positions(), &sensor.read_positions())
+        .expect("should show diff");
+
+    // f6 has a piece physically but is empty in expected → extra (Capture)
+    assert_eq!(fb.get(Square::F6), Some(SquareFeedback::Capture));
+    // e4 has wrong color (white pawn physically, black knight expected) → Capture
+    assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Capture));
+}
+
+#[test]
+fn opponent_capture_clears_after_physical_matches() {
+    let (mut engine, mut sensor) =
+        setup_fen("rnbqkb1r/pppppppp/5n2/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 2 1");
+    engine.tick(sensor.read_positions());
+
+    let mv = Move::Normal {
+        role: Role::Knight,
+        from: Square::F6,
+        capture: Some(Role::Pawn),
+        to: Square::E4,
+        promotion: None,
+    };
+    engine.apply_opponent_move(&mv).unwrap();
+
+    // Remove white pawn from e4, move black knight f6→e4
+    sensor.push_script("e4 f6 Be4.").unwrap();
+    let physical = sensor.tick().unwrap().expect("script produces positions");
+
+    let fb = recovery_feedback(&engine.expected_positions(), &physical);
+    assert!(
+        fb.is_none(),
+        "recovery should clear after capture completed"
+    );
+}
+
+#[test]
+fn opponent_castle_shows_diff_and_clears() {
+    // Black can castle kingside
+    let (mut engine, mut sensor) =
+        setup_fen("rnbqk2r/ppppppbp/5np1/8/4P3/5N2/PPPPBPPP/RNBQK2R b KQkq - 4 3");
+    engine.tick(sensor.read_positions());
+
+    let mv = Move::Castle {
+        king: Square::E8,
+        rook: Square::H8,
+    };
+    engine.apply_opponent_move(&mv).unwrap();
+
+    let fb = recovery_feedback(&engine.expected_positions(), &sensor.read_positions())
+        .expect("should show diff for castle");
+    assert_eq!(fb.get(Square::E8), Some(SquareFeedback::Capture));
+    assert_eq!(fb.get(Square::H8), Some(SquareFeedback::Capture));
+    assert_eq!(fb.get(Square::G8), Some(SquareFeedback::Destination));
+    assert_eq!(fb.get(Square::F8), Some(SquareFeedback::Destination));
+
+    // Physically move king e8→g8 and rook h8→f8
+    sensor.push_script("e8 Bg8 h8 Bf8.").unwrap();
+    let physical = sensor.tick().unwrap().expect("script produces positions");
+
+    let fb = recovery_feedback(&engine.expected_positions(), &physical);
+    assert!(fb.is_none(), "recovery should clear after castle completed");
+}
+
+#[test]
+fn opponent_en_passant_shows_diff_and_clears() {
+    // Black can en-passant capture on c3
+    let (mut engine, mut sensor) =
+        setup_fen("rnbqkbnr/pp1ppppp/8/8/2Pp4/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1");
+    engine.tick(sensor.read_positions());
+
+    let mv = Move::EnPassant {
+        from: Square::D4,
+        to: Square::C3,
+    };
+    engine.apply_opponent_move(&mv).unwrap();
+
+    let fb = recovery_feedback(&engine.expected_positions(), &sensor.read_positions())
+        .expect("should show diff for en passant");
+    assert_eq!(fb.get(Square::C4), Some(SquareFeedback::Capture));
+    assert_eq!(fb.get(Square::D4), Some(SquareFeedback::Capture));
+    assert_eq!(fb.get(Square::C3), Some(SquareFeedback::Destination));
+
+    // Physically remove captured pawn from c4, move d4→c3
+    sensor.push_script("c4 d4 Bc3.").unwrap();
+    let physical = sensor.tick().unwrap().expect("script produces positions");
+
+    let fb = recovery_feedback(&engine.expected_positions(), &physical);
+    assert!(
+        fb.is_none(),
+        "recovery should clear after en passant completed"
+    );
 }
