@@ -11,12 +11,23 @@ The Smart Chess Board is an ESP32-S3-based physical chess board that detects pie
 
 ## Getting Started
 
+### Prerequisites
+
+Install [Rust](https://rustup.rs), [just](https://github.com/casey/just), and the [ESP toolchain](https://github.com/esp-rs/espup#installation):
+
 ```bash
-# Install tooling and ESP targets
-mise install && mise run setup-esp
+rustup component add rust-src llvm-tools rust-analyzer
+
+cargo install espup cargo-espflash ldproxy
+espup install
+# Source ~/export-esp.sh in your shell profile (see espup output for details)
 
 # Clone ESP-IDF (required for firmware builds)
-mise run setup-idf
+just setup-idf
+
+# Configure local environment
+cp .env.example .env
+# Edit .env with your WiFi credentials
 
 # Set up rust-analyzer for host-side editor analysis
 cp rust-analyzer.toml.example rust-analyzer.toml
@@ -28,22 +39,21 @@ sed -i'' -e "s/SET_YOUR_HOST_TARGET_HERE/$(rustc -vV | grep host | cut -d' ' -f2
 ### Host (Development and Testing)
 
 ```bash
-mise run test    # Run all tests
-mise run dev     # Run interactive terminal simulator
+just test    # Run all tests
+just dev     # Run interactive terminal simulator
 ```
-
-Tests and the simulator require a `--target` flag pointing to your host triple.
-The mise tasks handle this automatically via `$HOST_TARGET`.
 
 ### ESP32-S3 Firmware
 
-The default cargo target is `xtensa-esp32s3-espidf`, so `cargo build`
-targets the ESP32-S3. The ESP toolchain is required (`cargo +esp`).
+The ESP toolchain is required (`cargo +esp`). The `just` tasks handle
+target selection and toolchain flags automatically.
 
 ```bash
-mise run build   # Build firmware
-mise run flash   # Flash to device
+just build   # Build firmware
+just flash   # Flash to device and monitor serial output
 ```
+
+Run `just` with no arguments to see all available tasks.
 
 ## Development
 

@@ -3,4 +3,4 @@
 /target
 /*.zip
 /rust-analyzer.toml
-/.mise.local.toml
+/.env
