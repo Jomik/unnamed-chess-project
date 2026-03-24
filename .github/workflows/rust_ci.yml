@@ -51,6 +51,9 @@ jobs:
             args: --release --target xtensa-esp32s3-espidf
           - command: +esp clippy
             args: --all-targets --all-features --workspace -- -D warnings
+    env:
+      WIFI_SSID: "ci-placeholder"
+      WIFI_PASSWORD: "ci-placeholder"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

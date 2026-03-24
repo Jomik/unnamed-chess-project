@@ -8,7 +8,7 @@ use esp_idf_svc::hal::units::FromValueType;
 
 use crate::BoardDisplay;
 use crate::esp32::config::{LedPalette, Rgb8};
-use crate::feedback::{BoardFeedback, SquareFeedback};
+use crate::feedback::{BoardFeedback, SquareFeedback, StatusKind};
 
 const NUM_LEDS: usize = 128;
 const LEDS_PER_ROW: usize = 16;
@@ -152,17 +152,36 @@ impl<'d> Esp32LedDisplay<'d> {
     }
 }
 
+/// Squares forming a hollow 4×4 ring in the board center (c3–f6, excluding d4–e5).
+const STATUS_RING: [shakmaty::Square; 12] = {
+    use shakmaty::Square::*;
+    [C3, D3, E3, F3, C4, F4, C5, F5, C6, D6, E6, F6]
+};
+
 impl BoardDisplay for Esp32LedDisplay<'_> {
     type Error = LedDisplayError;
 
     fn show(&mut self, feedback: &BoardFeedback) -> Result<(), Self::Error> {
         self.buffer.fill(self.palette.off);
 
-        for (sq, fb) in feedback.squares() {
-            let color = self.color_for(fb);
-            let (led1, led2) = leds_for_square(sq);
-            self.buffer[led1] = color;
-            self.buffer[led2] = color;
+        if let Some(status) = feedback.status() {
+            let color = match status {
+                StatusKind::Pending => self.palette.status_pending,
+                StatusKind::Success => self.palette.status_success,
+                StatusKind::Failure => self.palette.status_failure,
+            };
+            for sq in STATUS_RING {
+                let (led1, led2) = leds_for_square(sq);
+                self.buffer[led1] = color;
+                self.buffer[led2] = color;
+            }
+        } else {
+            for (sq, fb) in feedback.squares() {
+                let color = self.color_for(fb);
+                let (led1, led2) = leds_for_square(sq);
+                self.buffer[led1] = color;
+                self.buffer[led2] = color;
+            }
         }
 
         self.flush()

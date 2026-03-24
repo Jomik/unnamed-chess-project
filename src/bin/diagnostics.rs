@@ -41,6 +41,9 @@ fn main() {
         checker: Rgb8::new(0, 0, 0),
         victory: Rgb8::new(0, 0, 0),
         stalemate: Rgb8::new(0, 0, 0),
+        status_pending: Rgb8::new(0, 0, 0),
+        status_success: Rgb8::new(0, 0, 0),
+        status_failure: Rgb8::new(0, 0, 0),
     };
 
     let mut display = Esp32LedDisplay::new(peripherals.pins.gpio2, diag_palette)

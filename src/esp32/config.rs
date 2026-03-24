@@ -43,6 +43,9 @@ pub struct LedPalette {
     pub checker: Rgb8,
     pub victory: Rgb8,
     pub stalemate: Rgb8,
+    pub status_pending: Rgb8,
+    pub status_success: Rgb8,
+    pub status_failure: Rgb8,
 }
 
 impl Default for LedPalette {
@@ -56,6 +59,9 @@ impl Default for LedPalette {
             checker: Rgb8::new(20, 0, 0),
             victory: Rgb8::new(0, 20, 0),
             stalemate: Rgb8::new(20, 15, 0),
+            status_pending: Rgb8::new(0, 0, 20),
+            status_success: Rgb8::new(0, 20, 0),
+            status_failure: Rgb8::new(20, 0, 0),
         }
     }
 }

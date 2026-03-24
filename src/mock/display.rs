@@ -30,6 +30,15 @@ impl BoardDisplay for TerminalDisplay {
     type Error = DisplayError;
 
     fn show(&mut self, feedback: &BoardFeedback) -> Result<(), Self::Error> {
+        if let Some(status) = feedback.status() {
+            let label = match status {
+                crate::feedback::StatusKind::Pending => "PENDING",
+                crate::feedback::StatusKind::Success => "SUCCESS",
+                crate::feedback::StatusKind::Failure => "FAILURE",
+            };
+            println!("[status: {label}]");
+            return Ok(());
+        }
         render_feedback(&mut io::stdout(), feedback)
     }
 }
