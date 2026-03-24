@@ -7,8 +7,9 @@ use shakmaty::{Chess, Color, Move};
 
 use crate::opponent::Opponent;
 
-/// Timeout for worker startup. Generous for network operations but prevents infinite hangs.
-const WORKER_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+/// Timeout for worker startup. Must be longer than the stream connection timeout
+/// (60s in esp32/lichess.rs) to avoid false failures on slow networks.
+const WORKER_STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Configuration for Lichess integration, constructed from compile-time env vars.
 /// The token is not included here — it is passed directly to the LichessClient
@@ -52,7 +53,7 @@ pub enum GameStatus {
 
 impl GameStatus {
     /// Parse a status string from the Lichess API.
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "started" | "created" => Self::Started,
             "mate" => Self::Mate,
@@ -150,10 +151,19 @@ impl Opponent for LichessOpponent {
         if self.error || self.game_over {
             return;
         }
-        let uci = UciMove::from_standard(human_move.clone()).to_string();
-        if self.player_move_tx.send(uci).is_err() {
-            log::warn!("Lichess worker disconnected");
-            self.error = true;
+        let uci = UciMove::from_standard(*human_move).to_string();
+        match self.player_move_tx.try_send(uci) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(_)) => {
+                // Worker hasn't consumed the previous move yet — this
+                // shouldn't happen in normal play but avoids blocking
+                // the main sensor/LED loop if it does.
+                log::warn!("Lichess worker busy, dropping move");
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                log::warn!("Lichess worker disconnected");
+                self.error = true;
+            }
         }
     }
 
@@ -335,6 +345,123 @@ fn worker_loop<G: LichessGame>(
     }
 }
 
+// --- JSON parsing helpers (platform-independent) ---
+// These are used by the ESP32 HTTP implementation to parse Lichess NDJSON
+// events without pulling in a JSON crate. Kept here so they're testable
+// on the host. On non-ESP32 builds they're only used by tests.
+
+/// Extract a JSON string value by key. Finds `"key":"value"` or `"key": "value"`.
+#[cfg_attr(not(target_os = "espidf"), allow(dead_code))]
+pub(crate) fn extract_json_string(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{key}\"");
+    let start = json.find(&pattern)? + pattern.len();
+    let rest = &json[start..];
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix(':')?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix('"')?;
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Extract a nested JSON object as a raw string by brace-matching.
+#[cfg_attr(not(target_os = "espidf"), allow(dead_code))]
+pub(crate) fn extract_json_object(json: &str, key: &str) -> Option<String> {
+    let pattern = format!("\"{key}\"");
+    let key_start = json.find(&pattern)?;
+    let after_key = &json[key_start + pattern.len()..];
+    let after_key = after_key.trim_start();
+    let after_key = after_key.strip_prefix(':')?;
+    let after_key = after_key.trim_start();
+
+    if !after_key.starts_with('{') {
+        return None;
+    }
+
+    let mut depth = 0;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, ch) in after_key.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_string => escape = true,
+            '"' => in_string = !in_string,
+            '{' if !in_string => depth += 1,
+            '}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(after_key[..=i].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parse a Lichess NDJSON line into a GameEvent.
+/// Returns `None` for unknown event types (silently skipped),
+/// `Some(Ok(...))` for parsed events, `Some(Err(...))` for parse failures.
+#[cfg_attr(not(target_os = "espidf"), allow(dead_code))]
+pub(crate) fn parse_game_event(line: &str) -> Option<Result<GameEvent, String>> {
+    let event_type = match extract_json_string(line, "type") {
+        Some(t) => t,
+        None => {
+            return Some(Err(format!("no 'type' in event: {line}")));
+        }
+    };
+
+    match event_type.as_str() {
+        "gameFull" => {
+            let id = extract_json_string(line, "id").unwrap_or_default();
+            let initial_fen =
+                extract_json_string(line, "initialFen").unwrap_or_else(|| "startpos".to_string());
+            let state_json = match extract_json_object(line, "state") {
+                Some(s) => s,
+                None => {
+                    return Some(Err("no 'state' object in gameFull".into()));
+                }
+            };
+            let state = match parse_state_data(&state_json) {
+                Ok(s) => s,
+                Err(e) => return Some(Err(e)),
+            };
+            Some(Ok(GameEvent::GameFull {
+                id,
+                initial_fen,
+                state,
+            }))
+        }
+        "gameState" => Some(parse_state_data(line).map(GameEvent::GameState)),
+        _ => {
+            log::debug!("Ignoring Lichess event type: {event_type}");
+            None
+        }
+    }
+}
+
+/// Parse the state portion of a Lichess game event.
+#[cfg_attr(not(target_os = "espidf"), allow(dead_code))]
+pub(crate) fn parse_state_data(json: &str) -> Result<GameStateData, String> {
+    let moves = extract_json_string(json, "moves").unwrap_or_default();
+    let status_str =
+        extract_json_string(json, "status").ok_or_else(|| "no 'status' field".to_string())?;
+    let winner = extract_json_string(json, "winner").and_then(|w| match w.as_str() {
+        "white" => Some(shakmaty::Color::White),
+        "black" => Some(shakmaty::Color::Black),
+        _ => None,
+    });
+
+    Ok(GameStateData {
+        moves,
+        status: GameStatus::parse(&status_str),
+        winner,
+    })
+}
+
 #[cfg(all(test, not(target_os = "espidf")))]
 mod tests {
     use super::*;
@@ -458,7 +585,7 @@ mod tests {
         // Poll until the AI move arrives (with timeout)
         let after_human = {
             let mut pos = position.clone();
-            pos.play_unchecked(human_move.clone());
+            pos.play_unchecked(human_move);
             pos
         };
 
@@ -522,7 +649,7 @@ mod tests {
 
         let after_human = {
             let mut pos = position.clone();
-            pos.play_unchecked(human_move.clone());
+            pos.play_unchecked(human_move);
             pos
         };
 
@@ -583,7 +710,7 @@ mod tests {
 
         let pos1 = {
             let mut p = pos0.clone();
-            p.play_unchecked(human1_move.clone());
+            p.play_unchecked(human1_move);
             p
         };
 
@@ -610,7 +737,7 @@ mod tests {
 
         let pos3 = {
             let mut p = pos2.clone();
-            p.play_unchecked(human2_move.clone());
+            p.play_unchecked(human2_move);
             p
         };
 
@@ -637,5 +764,177 @@ mod tests {
 
         assert!(opponent.game_over, "game should be over after checkmate");
         assert!(!opponent.has_error(), "game over is not an error");
+    }
+
+    // --- JSON parser tests ---
+
+    #[test]
+    fn extract_json_string_basic() {
+        let json = r#"{"type":"gameFull","id":"abc12345"}"#;
+        assert_eq!(extract_json_string(json, "type"), Some("gameFull".into()));
+        assert_eq!(extract_json_string(json, "id"), Some("abc12345".into()));
+        assert_eq!(extract_json_string(json, "missing"), None);
+    }
+
+    #[test]
+    fn extract_json_string_with_spaces() {
+        let json = r#"{"type" : "gameState" , "status" : "started"}"#;
+        assert_eq!(extract_json_string(json, "type"), Some("gameState".into()));
+        assert_eq!(extract_json_string(json, "status"), Some("started".into()));
+    }
+
+    #[test]
+    fn extract_json_string_non_string_value() {
+        // Should return None when the value is not a string (e.g. number, bool)
+        let json = r#"{"level":4,"rated":true}"#;
+        assert_eq!(extract_json_string(json, "level"), None);
+        assert_eq!(extract_json_string(json, "rated"), None);
+    }
+
+    #[test]
+    fn extract_json_object_basic() {
+        let json = r#"{"state":{"moves":"e2e4","status":"started"}}"#;
+        let obj = extract_json_object(json, "state").unwrap();
+        assert_eq!(obj, r#"{"moves":"e2e4","status":"started"}"#);
+    }
+
+    #[test]
+    fn extract_json_object_nested() {
+        let json = r#"{"outer":{"inner":{"deep":"value"},"other":"x"}}"#;
+        let obj = extract_json_object(json, "outer").unwrap();
+        assert_eq!(obj, r#"{"inner":{"deep":"value"},"other":"x"}"#);
+    }
+
+    #[test]
+    fn extract_json_object_with_string_braces() {
+        // Braces inside strings should not confuse the parser
+        let json = r#"{"state":{"moves":"e2e4","note":"use {curly} braces"}}"#;
+        let obj = extract_json_object(json, "state").unwrap();
+        assert!(obj.contains(r#""moves":"e2e4""#));
+        assert!(obj.contains("{curly}"));
+    }
+
+    #[test]
+    fn extract_json_object_missing() {
+        let json = r#"{"type":"gameFull","id":"abc"}"#;
+        assert_eq!(extract_json_object(json, "state"), None);
+    }
+
+    #[test]
+    fn parse_game_event_game_full() {
+        let line = r#"{"type":"gameFull","id":"abc12345","initialFen":"startpos","state":{"moves":"","status":"started"}}"#;
+        let event = parse_game_event(line).unwrap().unwrap();
+        match event {
+            GameEvent::GameFull {
+                id,
+                initial_fen,
+                state,
+            } => {
+                assert_eq!(id, "abc12345");
+                assert_eq!(initial_fen, "startpos");
+                assert_eq!(state.moves, "");
+                assert_eq!(state.status, GameStatus::Started);
+                assert_eq!(state.winner, None);
+            }
+            _ => panic!("expected GameFull"),
+        }
+    }
+
+    #[test]
+    fn parse_game_event_game_state_with_moves() {
+        let line = r#"{"type":"gameState","moves":"e2e4 e7e5 d2d4","status":"started"}"#;
+        let event = parse_game_event(line).unwrap().unwrap();
+        match event {
+            GameEvent::GameState(state) => {
+                assert_eq!(state.moves, "e2e4 e7e5 d2d4");
+                assert_eq!(state.status, GameStatus::Started);
+            }
+            _ => panic!("expected GameState"),
+        }
+    }
+
+    #[test]
+    fn parse_game_event_checkmate_with_winner() {
+        let line = r#"{"type":"gameState","moves":"e2e4 e7e5","status":"mate","winner":"white"}"#;
+        let event = parse_game_event(line).unwrap().unwrap();
+        match event {
+            GameEvent::GameState(state) => {
+                assert_eq!(state.status, GameStatus::Mate);
+                assert_eq!(state.winner, Some(shakmaty::Color::White));
+            }
+            _ => panic!("expected GameState"),
+        }
+    }
+
+    #[test]
+    fn parse_game_event_unknown_type_skipped() {
+        let line = r#"{"type":"chatLine","username":"bob","text":"hello"}"#;
+        assert!(parse_game_event(line).is_none());
+    }
+
+    #[test]
+    fn parse_game_event_no_type_is_error() {
+        let line = r#"{"moves":"e2e4","status":"started"}"#;
+        let result = parse_game_event(line).unwrap();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_game_event_game_full_missing_state() {
+        let line = r#"{"type":"gameFull","id":"abc12345"}"#;
+        let result = parse_game_event(line).unwrap();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_state_data_all_statuses() {
+        for (input, expected) in [
+            ("started", GameStatus::Started),
+            ("created", GameStatus::Started),
+            ("mate", GameStatus::Mate),
+            ("resign", GameStatus::Resign),
+            ("stalemate", GameStatus::Stalemate),
+            ("draw", GameStatus::Draw),
+            ("aborted", GameStatus::Aborted),
+            ("timeout", GameStatus::Timeout),
+            ("outoftime", GameStatus::Outoftime),
+        ] {
+            let json = format!(r#"{{"moves":"","status":"{input}"}}"#);
+            let state = parse_state_data(&json).unwrap();
+            assert_eq!(state.status, expected, "failed for status: {input}");
+        }
+    }
+
+    #[test]
+    fn parse_state_data_unknown_status() {
+        let json = r#"{"moves":"","status":"cheat"}"#;
+        let state = parse_state_data(json).unwrap();
+        assert_eq!(state.status, GameStatus::Other("cheat".into()));
+    }
+
+    #[test]
+    fn parse_state_data_missing_status_is_error() {
+        let json = r#"{"moves":"e2e4"}"#;
+        assert!(parse_state_data(json).is_err());
+    }
+
+    #[test]
+    fn parse_real_lichess_game_full() {
+        // Simplified but structurally accurate gameFull event from Lichess
+        let line = r#"{"type":"gameFull","id":"gZlNuPte","rated":false,"variant":{"key":"standard"},"clock":{"initial":10800000,"increment":180000},"speed":"classical","perf":{"name":"Classical"},"createdAt":1711305600000,"white":{"id":"player1","name":"Player1","rating":1500},"black":{"aiLevel":4},"initialFen":"startpos","state":{"type":"gameState","moves":"","status":"started","wtime":10800000,"btime":10800000,"winc":180000,"binc":180000}}"#;
+        let event = parse_game_event(line).unwrap().unwrap();
+        match event {
+            GameEvent::GameFull {
+                id,
+                initial_fen,
+                state,
+            } => {
+                assert_eq!(id, "gZlNuPte");
+                assert_eq!(initial_fen, "startpos");
+                assert_eq!(state.status, GameStatus::Started);
+                assert_eq!(state.moves, "");
+            }
+            _ => panic!("expected GameFull"),
+        }
     }
 }

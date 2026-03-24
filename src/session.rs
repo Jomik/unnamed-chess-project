@@ -42,17 +42,23 @@ impl GameSession {
     }
 
     /// Create a session from the standard starting position with an opponent.
+    /// The human plays White; the opponent controls Black.
     pub fn with_opponent(opponent: Box<dyn Opponent>) -> Self {
+        let mut engine = GameEngine::new();
+        engine.set_human_color(shakmaty::Color::White);
         Self {
-            engine: GameEngine::new(),
+            engine,
             opponent: Some(opponent),
         }
     }
 
     /// Create a session from a specific position with an opponent.
+    /// The human plays White; the opponent controls Black.
     pub fn from_position_with_opponent(position: Chess, opponent: Box<dyn Opponent>) -> Self {
+        let mut engine = GameEngine::from_position(position);
+        engine.set_human_color(shakmaty::Color::White);
         Self {
-            engine: GameEngine::from_position(position),
+            engine,
             opponent: Some(opponent),
         }
     }
@@ -297,7 +303,8 @@ mod tests {
 
     #[test]
     fn from_position_with_opponent_starts_at_given_position() {
-        let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
+        // Start from a position where it's White's turn (human plays White).
+        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
         let position: Chess = fen
             .parse::<shakmaty::fen::Fen>()
             .unwrap()
@@ -313,9 +320,9 @@ mod tests {
         let mut session =
             GameSession::from_position_with_opponent(position, Box::new(EmbeddedEngine::new(42)));
 
-        assert_eq!(session.position().turn(), Color::Black);
+        assert_eq!(session.position().turn(), Color::White);
 
-        sensor.push_script("e7 Be5.").unwrap();
+        sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
         assert!(result.computer_move.is_some(), "opponent should be active");
     }

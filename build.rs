@@ -7,8 +7,8 @@ fn main() {
     // Lichess config: emit defaults for optional env vars so env!() works at compile time.
     // If the user sets these in .env, their values take precedence.
     emit_default_env("LICHESS_AI_LEVEL", "4");
-    emit_default_env("LICHESS_CLOCK_LIMIT", "600");
-    emit_default_env("LICHESS_CLOCK_INCREMENT", "0");
+    emit_default_env("LICHESS_CLOCK_LIMIT", "10800");
+    emit_default_env("LICHESS_CLOCK_INCREMENT", "180");
 }
 
 fn emit_default_env(key: &str, default: &str) {

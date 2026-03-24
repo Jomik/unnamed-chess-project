@@ -8,3 +8,8 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
 # Enable mbedTLS certificate bundle for HTTPS (needed for Lichess API)
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# Suppress noisy "Certificate validated" logs from the TLS bundle
+# (fires on every HTTPS connection — clutters serial output)
+CONFIG_ESP_X509_CRT_BUNDLE_LOG_LEVEL_WARN=y
+

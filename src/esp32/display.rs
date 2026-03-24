@@ -6,9 +6,9 @@ use esp_idf_svc::hal::rmt::encoder::{BytesEncoder, BytesEncoderConfig, RawEncode
 use esp_idf_svc::hal::rmt::{PinState, Symbol, TxChannelDriver};
 use esp_idf_svc::hal::units::FromValueType;
 
+use crate::BoardDisplay;
 use crate::esp32::config::{LedPalette, Rgb8};
 use crate::feedback::{BoardFeedback, SquareFeedback, StatusKind};
-use crate::BoardDisplay;
 
 const NUM_LEDS: usize = 128;
 const LEDS_PER_ROW: usize = 16;

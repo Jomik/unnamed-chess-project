@@ -67,13 +67,23 @@ impl GameState {
 }
 
 /// Core game engine that processes sensor input and maintains game state
-#[derive(Default)]
+impl Default for GameEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct GameEngine {
     /// The logical chess position (piece types, turn, castling rights, etc.)
     position: Chess,
 
     /// Last known physical board state from sensors, per color.
     last_positions: ByColor<Bitboard>,
+
+    /// Which color the human plays. When set, the engine only detects
+    /// moves for this color — the opponent's moves are applied via
+    /// `apply_opponent_move` instead of board detection.
+    human_color: Option<Color>,
 }
 
 impl GameEngine {
@@ -92,7 +102,14 @@ impl GameEngine {
         Self {
             position,
             last_positions,
+            human_color: None,
         }
+    }
+
+    /// Set which color the human plays. When set, the engine only detects
+    /// moves for this color — opponent piece movements on the board are ignored.
+    pub fn set_human_color(&mut self, color: Color) {
+        self.human_color = Some(color);
     }
 
     /// Get the piece at a given square, if any
@@ -303,6 +320,12 @@ impl GameEngine {
         self.last_positions = current;
 
         let turn = self.position.turn();
+
+        // When a human color is set, only detect moves for that color.
+        // The opponent's moves are applied via apply_opponent_move().
+        if self.human_color.is_some_and(|c| c != turn) {
+            return None;
+        }
         let expected_our = self.position.board().by_color(turn);
         let our_current = current[turn];
 

@@ -1,13 +1,11 @@
-use embedded_svc::http::client::Client as HttpClient;
+use crate::lichess::{
+    GameEvent, LichessClient, LichessGame, LichessStream, extract_json_string, parse_game_event,
+};
 use embedded_svc::http::Method;
+use embedded_svc::http::client::Client as HttpClient;
 use embedded_svc::io::Write;
 use esp_idf_svc::http::client::{Configuration as HttpConfig, EspHttpConnection};
 use esp_idf_svc::sys::esp_crt_bundle_attach;
-use shakmaty::Color;
-
-use crate::lichess::{
-    GameEvent, GameStateData, GameStatus, LichessClient, LichessGame, LichessStream,
-};
 
 const LICHESS_BASE: &str = "https://lichess.org";
 
@@ -140,8 +138,6 @@ struct Esp32LichessStreamImpl {
     /// The NDJSON stream connection -- held in Response state.
     /// We read bytes directly from this via embedded_io::Read.
     stream_conn: EspHttpConnection,
-    /// Reusable POST client for make_move requests.
-    post_client: HttpClient<EspHttpConnection>,
     /// Token for POST Authorization header.
     post_token: &'static str,
     /// Game ID for constructing POST URLs.
@@ -152,12 +148,8 @@ struct Esp32LichessStreamImpl {
 
 impl Esp32LichessStreamImpl {
     fn connect(token: &'static str, game_id: &str) -> Result<Self, Esp32LichessError> {
-        // Stream connection: The spec calls for 10s on initial connection and
-        // 60s for steady-state reads, but esp-idf-svc sets timeout per-connection,
-        // not per-operation. We use 60s because the steady-state read timeout is
-        // the critical one (AI thinking time). The initial HTTP handshake completes
-        // in <1s on a working network; a 60s timeout just means slower failure
-        // detection on a bad connection at startup, which is acceptable.
+        // Stream connection: 60s timeout for steady-state reads (AI thinking time).
+        // esp-idf-svc sets timeout per-connection, not per-operation.
         let stream_config = HttpConfig {
             timeout: Some(std::time::Duration::from_secs(60)),
             crt_bundle_attach: Some(esp_crt_bundle_attach),
@@ -187,21 +179,8 @@ impl Esp32LichessStreamImpl {
             )));
         }
 
-        // POST client: 10s timeout, reused across moves
-        let post_config = HttpConfig {
-            timeout: Some(std::time::Duration::from_secs(10)),
-            crt_bundle_attach: Some(esp_crt_bundle_attach),
-            ..Default::default()
-        };
-
-        let post_client = HttpClient::wrap(
-            EspHttpConnection::new(&post_config)
-                .map_err(|e| Esp32LichessError::Http(e.to_string()))?,
-        );
-
         Ok(Self {
             stream_conn,
-            post_client,
             post_token: token,
             game_id: game_id.to_string(),
             line_buf: Vec::with_capacity(4096),
@@ -245,7 +224,8 @@ impl LichessStream for Esp32LichessStreamImpl {
                 Ok(Some(line)) if line.trim().is_empty() => continue, // keep-alive ping
                 Ok(Some(line)) => {
                     match parse_game_event(&line) {
-                        Some(result) => return Some(result),
+                        Some(Ok(event)) => return Some(Ok(event)),
+                        Some(Err(e)) => return Some(Err(Esp32LichessError::Parse(e))),
                         None => continue, // unknown event type, skip
                     }
                 }
@@ -256,15 +236,30 @@ impl LichessStream for Esp32LichessStreamImpl {
     }
 
     fn make_move(&mut self, uci_move: &str) -> Result<(), Esp32LichessError> {
+        // Fresh connection per move. ESP-IDF's HTTP client has known bugs
+        // with connection reuse after POST requests (esp-idf #5117, #17605).
+        // A fresh TLS handshake costs ~2s but is completely reliable.
+        let config = HttpConfig {
+            timeout: Some(std::time::Duration::from_secs(10)),
+            crt_bundle_attach: Some(esp_crt_bundle_attach),
+            ..Default::default()
+        };
+
+        let mut client = HttpClient::wrap(
+            EspHttpConnection::new(&config).map_err(|e| Esp32LichessError::Http(e.to_string()))?,
+        );
+
         let url = format!(
             "{LICHESS_BASE}/api/board/game/{}/move/{uci_move}",
             self.game_id
         );
         let auth_header = format!("Bearer {}", self.post_token);
-        let headers = [("Authorization", auth_header.as_str())];
+        let headers = [
+            ("Authorization", auth_header.as_str()),
+            ("Content-Length", "0"),
+        ];
 
-        let request = self
-            .post_client
+        let request = client
             .request(Method::Post, &url, &headers)
             .map_err(|e| Esp32LichessError::Http(e.to_string()))?;
 
@@ -279,122 +274,6 @@ impl LichessStream for Esp32LichessStreamImpl {
             )));
         }
 
-        // Response is dropped here, freeing the borrow on post_client
-        // so it can be reused for the next move.
         Ok(())
     }
-}
-
-// --- JSON parsing helpers ---
-
-/// Minimal JSON string extractor -- avoids pulling in a JSON crate.
-/// Finds `"key":"value"` or `"key": "value"` and returns value.
-fn extract_json_string(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{key}\"");
-    let start = json.find(&pattern)? + pattern.len();
-    let rest = &json[start..];
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix(':')?;
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix('"')?;
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
-}
-
-/// Extract a nested JSON object as a raw string by brace-matching.
-/// Given `"state":{"moves":"e2e4","status":"started"}`, returns
-/// `{"moves":"e2e4","status":"started"}`.
-fn extract_json_object(json: &str, key: &str) -> Option<String> {
-    let pattern = format!("\"{key}\"");
-    let key_start = json.find(&pattern)?;
-    let after_key = &json[key_start + pattern.len()..];
-    let after_key = after_key.trim_start();
-    let after_key = after_key.strip_prefix(':')?;
-    let after_key = after_key.trim_start();
-
-    if !after_key.starts_with('{') {
-        return None;
-    }
-
-    let mut depth = 0;
-    let mut in_string = false;
-    let mut escape = false;
-    for (i, ch) in after_key.char_indices() {
-        if escape {
-            escape = false;
-            continue;
-        }
-        match ch {
-            '\\' if in_string => escape = true,
-            '"' => in_string = !in_string,
-            '{' if !in_string => depth += 1,
-            '}' if !in_string => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(after_key[..=i].to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn parse_game_event(line: &str) -> Option<Result<GameEvent, Esp32LichessError>> {
-    let event_type = match extract_json_string(line, "type") {
-        Some(t) => t,
-        None => {
-            return Some(Err(Esp32LichessError::Parse(format!(
-                "no 'type' in event: {line}"
-            ))));
-        }
-    };
-
-    match event_type.as_str() {
-        "gameFull" => {
-            let id = extract_json_string(line, "id").unwrap_or_default();
-            let initial_fen =
-                extract_json_string(line, "initialFen").unwrap_or_else(|| "startpos".to_string());
-            let state_json = match extract_json_object(line, "state") {
-                Some(s) => s,
-                None => {
-                    return Some(Err(Esp32LichessError::Parse(
-                        "no 'state' object in gameFull".into(),
-                    )));
-                }
-            };
-            let state = match parse_state_data(&state_json) {
-                Ok(s) => s,
-                Err(e) => return Some(Err(e)),
-            };
-            Some(Ok(GameEvent::GameFull {
-                id,
-                initial_fen,
-                state,
-            }))
-        }
-        "gameState" => Some(parse_state_data(line).map(GameEvent::GameState)),
-        // chatLine, opponentGone, etc. -- silently skip
-        _ => {
-            log::debug!("Ignoring Lichess event type: {event_type}");
-            None
-        }
-    }
-}
-
-fn parse_state_data(json: &str) -> Result<GameStateData, Esp32LichessError> {
-    let moves = extract_json_string(json, "moves").unwrap_or_default();
-    let status_str = extract_json_string(json, "status")
-        .ok_or_else(|| Esp32LichessError::Parse("no 'status' field".into()))?;
-    let winner = extract_json_string(json, "winner").and_then(|w| match w.as_str() {
-        "white" => Some(Color::White),
-        "black" => Some(Color::Black),
-        _ => None,
-    });
-
-    Ok(GameStateData {
-        moves,
-        status: GameStatus::from_str(&status_str),
-        winner,
-    })
 }

@@ -103,8 +103,61 @@ fn main() {
         log::warn!("LED clear failed: {e}");
     }
 
-    let opponent = EmbeddedEngine::new(unsafe { esp_idf_svc::sys::esp_random() });
-    let mut session = GameSession::with_opponent(Box::new(opponent));
+    let opponent: Box<dyn unnamed_chess_project::opponent::Opponent> =
+        match option_env!("LICHESS_API_TOKEN") {
+            Some(token) if _wifi.is_some() => {
+                use unnamed_chess_project::esp32::Esp32LichessClient;
+                use unnamed_chess_project::lichess::{LichessConfig, spawn_lichess_opponent};
+
+                let config = LichessConfig {
+                    level: env!("LICHESS_AI_LEVEL").parse().unwrap(),
+                    clock_limit: env!("LICHESS_CLOCK_LIMIT").parse().unwrap(),
+                    clock_increment: env!("LICHESS_CLOCK_INCREMENT").parse().unwrap(),
+                };
+
+                let client = Esp32LichessClient::new(token);
+
+                let spawn_fn = |f: Box<dyn FnOnce() + Send>| -> Result<(), String> {
+                    std::thread::Builder::new()
+                        .stack_size(8192)
+                        .spawn(f)
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                };
+
+                match spawn_lichess_opponent(client, config, spawn_fn) {
+                    Ok(lichess_opponent) => {
+                        log::info!("Lichess opponent ready");
+                        if let Err(e) =
+                            display.show(&BoardFeedback::with_status(StatusKind::Success))
+                        {
+                            log::warn!("LED update failed: {e}");
+                        }
+                        FreeRtos::delay_ms(500);
+                        Box::new(lichess_opponent)
+                    }
+                    Err(e) => {
+                        log::warn!("Lichess setup failed: {e} — falling back to embedded AI");
+                        if let Err(e) =
+                            display.show(&BoardFeedback::with_status(StatusKind::Failure))
+                        {
+                            log::warn!("LED update failed: {e}");
+                        }
+                        FreeRtos::delay_ms(500);
+                        Box::new(EmbeddedEngine::new(unsafe {
+                            esp_idf_svc::sys::esp_random()
+                        }))
+                    }
+                }
+            }
+            _ => {
+                log::info!("No Lichess token — using embedded AI");
+                Box::new(EmbeddedEngine::new(unsafe {
+                    esp_idf_svc::sys::esp_random()
+                }))
+            }
+        };
+    let mut session = GameSession::with_opponent(opponent);
     let mut prev = ByColor {
         white: Bitboard::EMPTY,
         black: Bitboard::EMPTY,

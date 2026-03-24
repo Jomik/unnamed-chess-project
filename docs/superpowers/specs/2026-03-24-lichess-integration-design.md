@@ -168,8 +168,8 @@ pub enum GameStatus {
 pub struct LichessConfig {
     pub token: &'static str,   // LICHESS_API_TOKEN — static str from env!()
     pub level: u8,             // LICHESS_AI_LEVEL, 1-8, default 4
-    pub clock_limit: u32,      // LICHESS_CLOCK_LIMIT, seconds, default 600
-    pub clock_increment: u32,  // LICHESS_CLOCK_INCREMENT, seconds, default 0
+    pub clock_limit: u32,      // LICHESS_CLOCK_LIMIT, seconds, default 10800 (3 hours)
+    pub clock_increment: u32,  // LICHESS_CLOCK_INCREMENT, seconds, default 180 (3 min)
 }
 ```
 
@@ -315,8 +315,8 @@ After WiFi connects successfully:
 |---|---|---|---|
 | `LICHESS_API_TOKEN` | No (falls back to embedded AI) | - | Personal access token; required to enable Lichess mode. See scope note above. |
 | `LICHESS_AI_LEVEL` | No | `4` | Stockfish level 1-8 |
-| `LICHESS_CLOCK_LIMIT` | No | `600` | Clock initial time in seconds (10 min) |
-| `LICHESS_CLOCK_INCREMENT` | No | `0` | Clock increment in seconds |
+| `LICHESS_CLOCK_LIMIT` | No | `10800` | Clock initial time in seconds (3 hours — board has no clock display) |
+| `LICHESS_CLOCK_INCREMENT` | No | `180` | Clock increment in seconds (3 min per move) |
 
 Same `env!()` / `option_env!()` pattern as `WIFI_SSID` / `WIFI_PASSWORD`.
 
