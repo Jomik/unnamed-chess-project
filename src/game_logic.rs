@@ -93,7 +93,9 @@ impl GameEngine {
     }
 
     /// Creates a GameEngine from an existing chess position.
-    pub fn from_position(position: Chess) -> Self {
+    /// If `human_color` is set, the engine only detects moves for that color —
+    /// opponent piece movements on the board are ignored.
+    pub fn from_position_for_color(position: Chess, human_color: Option<Color>) -> Self {
         let board = position.board();
         let last_positions = ByColor {
             white: board.by_color(Color::White),
@@ -102,14 +104,13 @@ impl GameEngine {
         Self {
             position,
             last_positions,
-            human_color: None,
+            human_color,
         }
     }
 
-    /// Set which color the human plays. When set, the engine only detects
-    /// moves for this color — opponent piece movements on the board are ignored.
-    pub fn set_human_color(&mut self, color: Color) {
-        self.human_color = Some(color);
+    /// Creates a GameEngine from an existing chess position (both colors detected).
+    pub fn from_position(position: Chess) -> Self {
+        Self::from_position_for_color(position, None)
     }
 
     /// Get the piece at a given square, if any

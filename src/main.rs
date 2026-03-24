@@ -110,9 +110,18 @@ fn main() {
                 use unnamed_chess_project::lichess::{LichessConfig, spawn_lichess_opponent};
 
                 let config = LichessConfig {
-                    level: env!("LICHESS_AI_LEVEL").parse().unwrap(),
-                    clock_limit: env!("LICHESS_CLOCK_LIMIT").parse().unwrap(),
-                    clock_increment: env!("LICHESS_CLOCK_INCREMENT").parse().unwrap(),
+                    level: option_env!("LICHESS_AI_LEVEL")
+                        .unwrap_or("4")
+                        .parse()
+                        .unwrap(),
+                    clock_limit: option_env!("LICHESS_CLOCK_LIMIT")
+                        .unwrap_or("10800")
+                        .parse()
+                        .unwrap(),
+                    clock_increment: option_env!("LICHESS_CLOCK_INCREMENT")
+                        .unwrap_or("180")
+                        .parse()
+                        .unwrap(),
                 };
 
                 let client = Esp32LichessClient::new(token);

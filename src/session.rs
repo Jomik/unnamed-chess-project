@@ -44,10 +44,11 @@ impl GameSession {
     /// Create a session from the standard starting position with an opponent.
     /// The human plays White; the opponent controls Black.
     pub fn with_opponent(opponent: Box<dyn Opponent>) -> Self {
-        let mut engine = GameEngine::new();
-        engine.set_human_color(shakmaty::Color::White);
         Self {
-            engine,
+            engine: GameEngine::from_position_for_color(
+                Chess::default(),
+                Some(shakmaty::Color::White),
+            ),
             opponent: Some(opponent),
         }
     }
@@ -55,10 +56,8 @@ impl GameSession {
     /// Create a session from a specific position with an opponent.
     /// The human plays White; the opponent controls Black.
     pub fn from_position_with_opponent(position: Chess, opponent: Box<dyn Opponent>) -> Self {
-        let mut engine = GameEngine::from_position(position);
-        engine.set_human_color(shakmaty::Color::White);
         Self {
-            engine,
+            engine: GameEngine::from_position_for_color(position, Some(shakmaty::Color::White)),
             opponent: Some(opponent),
         }
     }
