@@ -26,9 +26,10 @@ src/
     terminal.rs    — Interactive terminal simulator for manual testing
     display.rs     — TerminalDisplay: ANSI terminal BoardDisplay for development
 build.rs           — Runs embuild ESP-IDF setup only when targeting espidf
-.cargo/config.toml — Cargo config: default ESP32 target, linker, runner, env
+.cargo/config.toml — Cargo config: ESP32 target settings, linker, runner, env (IDF_PATH)
 sdkconfig.defaults — ESP-IDF kernel config (stack size, FreeRTOS tick rate)
-.mise.toml         — Tool versions (rust, espup, cargo-espflash, ldproxy) and task shortcuts
+justfile           — Task runner: build, flash, test, dev, etc.
+.env.example       — Template for local environment variables (WiFi credentials)
 Cargo.toml         — Dependencies: shakmaty (chess), thiserror (errors), esp-idf-svc (ESP32)
 ```
 
@@ -124,22 +125,19 @@ This format is used extensively in `src/game_logic.rs` tests via `execute_script
 
 ### Host (development / CI tests)
 
-The default cargo target is ESP32-S3 (`xtensa-esp32s3-espidf`), so host commands
-require an explicit `--target` flag. The mise tasks handle this automatically:
-
 ```bash
-mise run test    # Run all tests on host
-mise run dev     # Run interactive terminal simulator on host
+just test    # Run all tests on host
+just dev     # Run interactive terminal simulator on host
 ```
 
 ### ESP32 firmware
 
-> Requires the ESP toolchain. Run `mise install && mise run setup-esp` once per machine.
+> Requires the ESP toolchain. Run `espup install` once per machine.
 
 ```bash
-mise run build     # Build firmware
-mise run flash     # Flash to device
-mise run monitor   # Monitor serial output
+just build     # Build firmware
+just flash     # Flash to device
+just monitor   # Monitor serial output
 ```
 
 ### Linting / formatting
@@ -182,7 +180,7 @@ See `.github/instructions/rust.instructions.md` for full Rust coding conventions
 
 ## Common Pitfalls
 
-1. **Running `cargo test` without `--target`** defaults to the ESP32 target and will fail without the ESP toolchain. Use `mise run test` or pass `--target <your-host-triple>` explicitly.
+1. **Running `cargo test` without `--target`** defaults to the ESP32 target and will fail without the ESP toolchain. Use `just test` or pass `--target <your-host-triple>` explicitly.
 2. **Clippy is strict**: `-D warnings` means any clippy warning fails CI. Run clippy locally before pushing.
 3. **The `esp32` module does not compile on host** and vice versa for `mock`. Don't mix imports across the boundary.
 4. **`Esp32PieceSensor`** methods panic with `todo!()` — this is intentional (ADC/multiplexer hardware not yet wired). Do not remove the `todo!` without implementing that logic.

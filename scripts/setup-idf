@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Clone ESP-IDF (workaround for embuild recursive clone failure on macOS)"
+# Clone ESP-IDF (workaround for embuild recursive clone failure on macOS)
 set -euo pipefail
 
 IDF_VERSION="v5.5.3"
