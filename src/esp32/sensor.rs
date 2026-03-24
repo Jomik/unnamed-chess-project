@@ -1,5 +1,5 @@
-use crate::PieceSensor;
 use crate::esp32::config::SensorConfig;
+use crate::PieceSensor;
 use esp_idf_svc::hal::adc::attenuation;
 use esp_idf_svc::hal::adc::oneshot::config::AdcChannelConfig;
 use esp_idf_svc::hal::adc::oneshot::{AdcChannelDriver, AdcDriver};
