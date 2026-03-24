@@ -131,6 +131,12 @@ impl BoardFeedback {
     pub fn is_empty(&self) -> bool {
         self.status.is_none() && self.squares.iter().all(|s| s.is_none())
     }
+
+    /// Return a copy with the given status merged in (overwrites any existing status).
+    pub fn with_merged_status(mut self, kind: StatusKind) -> Self {
+        self.status = Some(kind);
+        self
+    }
 }
 
 impl Default for BoardFeedback {
@@ -345,7 +351,7 @@ fn captures_square(mv: &Move, captured_sq: Square) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shakmaty::{CastlingMode, Chess, Position, Role, fen::Fen};
+    use shakmaty::{fen::Fen, CastlingMode, Chess, Position, Role};
 
     struct MockFeedbackSource {
         moves: Vec<Move>,
