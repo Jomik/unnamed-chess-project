@@ -1,6 +1,6 @@
 use shakmaty::{Bitboard, ByColor, Chess, Move};
 
-use crate::feedback::{BoardFeedback, compute_feedback};
+use crate::feedback::{compute_feedback, BoardFeedback};
 use crate::game_logic::{GameEngine, GameState};
 use crate::opponent::Opponent;
 use crate::recovery::recovery_feedback;
@@ -99,7 +99,7 @@ impl GameSession {
 
         opponent.start_thinking(self.engine.position(), human_move);
 
-        let reply = opponent.poll_move()?;
+        let reply = opponent.poll_move(self.engine.position())?;
         match self.engine.apply_opponent_move(&reply) {
             Ok(()) => Some(reply),
             Err(e) => {

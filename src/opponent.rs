@@ -9,7 +9,12 @@ pub trait Opponent {
     fn start_thinking(&mut self, position: &Chess, human_move: &Move);
 
     /// Poll for a computed move. Returns `Some(move)` when ready.
-    fn poll_move(&mut self) -> Option<Move>;
+    fn poll_move(&mut self, position: &Chess) -> Option<Move>;
+
+    /// Check if the opponent encountered an error.
+    fn has_error(&self) -> bool {
+        false
+    }
 }
 
 /// Simple embedded opponent that picks a move immediately.
@@ -87,7 +92,7 @@ impl Opponent for EmbeddedEngine {
         self.pending = chosen.cloned();
     }
 
-    fn poll_move(&mut self) -> Option<Move> {
+    fn poll_move(&mut self, _position: &Chess) -> Option<Move> {
         self.pending.take()
     }
 }
@@ -95,7 +100,7 @@ impl Opponent for EmbeddedEngine {
 #[cfg(all(test, not(target_os = "espidf")))]
 mod tests {
     use super::*;
-    use shakmaty::{CastlingMode, Square, fen::Fen};
+    use shakmaty::{fen::Fen, CastlingMode, Square};
 
     fn position_from_fen(fen: &str) -> Chess {
         let setup: Fen = fen.parse().expect("valid FEN");
@@ -121,7 +126,7 @@ mod tests {
         let pos = position_from_fen("8/8/8/8/2n5/4P3/3Q4/4K1k1 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move().expect("should have a move");
+        let mv = engine.poll_move(&pos).expect("should have a move");
         assert!(mv.is_capture());
         assert_eq!(mv.capture(), Some(Role::Queen));
     }
@@ -132,7 +137,7 @@ mod tests {
         let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move().expect("should have a move");
+        let mv = engine.poll_move(&pos).expect("should have a move");
         assert!(!mv.is_capture());
     }
 
@@ -142,7 +147,7 @@ mod tests {
         let pos = position_from_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move().expect("should have a move");
+        let mv = engine.poll_move(&pos).expect("should have a move");
         assert!(matches!(mv, Move::Castle { .. }));
     }
 
@@ -152,7 +157,7 @@ mod tests {
         let pos = position_from_fen("8/8/8/8/8/k7/3p4/K7 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move().expect("should have a move");
+        let mv = engine.poll_move(&pos).expect("should have a move");
         assert_eq!(mv.promotion(), Some(Role::Queen));
     }
 
@@ -163,7 +168,7 @@ mod tests {
         let mut engine = EmbeddedEngine::new(42);
         for _ in 0..20 {
             engine.start_thinking(&pos, &dummy_move());
-            let mv = engine.poll_move().expect("should have a move");
+            let mv = engine.poll_move(&pos).expect("should have a move");
             assert_ne!(mv.role(), Role::King);
         }
     }
@@ -174,7 +179,7 @@ mod tests {
         let pos = position_from_fen("8/8/8/8/8/8/8/k3K3 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move().expect("should have a move");
+        let mv = engine.poll_move(&pos).expect("should have a move");
         assert_eq!(mv.role(), Role::King);
     }
 
@@ -183,7 +188,15 @@ mod tests {
         let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.start_thinking(&pos, &dummy_move());
-        let _ = engine.poll_move();
-        assert!(engine.poll_move().is_none());
+        let _ = engine.poll_move(&pos);
+        assert!(engine.poll_move(&pos).is_none());
+    }
+
+    #[test]
+    fn poll_move_accepts_position() {
+        let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
+        let mut engine = EmbeddedEngine::new(42);
+        engine.start_thinking(&pos, &dummy_move());
+        let _mv = engine.poll_move(&pos);
     }
 }
