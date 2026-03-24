@@ -1,6 +1,6 @@
 use shakmaty::{Bitboard, ByColor, Chess, Move};
 
-use crate::feedback::{compute_feedback, BoardFeedback, StatusKind};
+use crate::feedback::{BoardFeedback, StatusKind, compute_feedback};
 use crate::game_logic::{GameEngine, GameState};
 use crate::opponent::Opponent;
 use crate::recovery::recovery_feedback;

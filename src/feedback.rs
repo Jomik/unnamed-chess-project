@@ -351,7 +351,7 @@ fn captures_square(mv: &Move, captured_sq: Square) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shakmaty::{fen::Fen, CastlingMode, Chess, Position, Role};
+    use shakmaty::{CastlingMode, Chess, Position, Role, fen::Fen};
 
     struct MockFeedbackSource {
         moves: Vec<Move>,

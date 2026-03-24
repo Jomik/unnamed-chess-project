@@ -100,7 +100,7 @@ impl Opponent for EmbeddedEngine {
 #[cfg(all(test, not(target_os = "espidf")))]
 mod tests {
     use super::*;
-    use shakmaty::{fen::Fen, CastlingMode, Square};
+    use shakmaty::{CastlingMode, Square, fen::Fen};
 
     fn position_from_fen(fen: &str) -> Chess {
         let setup: Fen = fen.parse().expect("valid FEN");
