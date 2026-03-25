@@ -131,6 +131,12 @@ impl BoardFeedback {
     pub fn is_empty(&self) -> bool {
         self.status.is_none() && self.squares.iter().all(|s| s.is_none())
     }
+
+    /// Return a copy with the given status merged in (overwrites any existing status).
+    pub fn with_merged_status(mut self, kind: StatusKind) -> Self {
+        self.status = Some(kind);
+        self
+    }
 }
 
 impl Default for BoardFeedback {
