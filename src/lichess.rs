@@ -47,7 +47,7 @@ pub enum GameStatus {
     Draw,
     Aborted,
     Timeout,
-    Outoftime,
+    OutOfTime,
     Other(String),
 }
 
@@ -62,7 +62,7 @@ impl GameStatus {
             "draw" => Self::Draw,
             "aborted" => Self::Aborted,
             "timeout" => Self::Timeout,
-            "outoftime" => Self::Outoftime,
+            "outoftime" => Self::OutOfTime,
             other => Self::Other(other.to_string()),
         }
     }
@@ -107,7 +107,7 @@ impl<H: std::fmt::Debug, S: std::fmt::Debug> std::fmt::Debug for SpawnError<H, S
     }
 }
 
-/// Used on the calling thread during startup. Implementations may be !Send.
+/// Creates a Lichess game challenge. Used on the calling thread during startup.
 pub trait LichessClient {
     type Error: std::fmt::Debug + std::fmt::Display;
     type Game: LichessGame<Error = Self::Error> + Send + 'static;
@@ -120,8 +120,7 @@ pub trait LichessClient {
     ) -> Result<Self::Game, Self::Error>;
 }
 
-/// Moved into the background worker. Must be Send.
-/// Holds game ID and config — no HTTP connection.
+/// A created game, moved into the background worker to open the event stream.
 pub trait LichessGame: Send + 'static {
     type Error: std::fmt::Debug + std::fmt::Display;
 
@@ -129,7 +128,7 @@ pub trait LichessGame: Send + 'static {
     fn into_stream(self) -> Result<Box<dyn LichessStream<Error = Self::Error>>, Self::Error>;
 }
 
-/// Owned by the background worker. May be !Send.
+/// Owned by the background worker.
 pub trait LichessStream {
     type Error: std::fmt::Debug + std::fmt::Display;
 
@@ -897,7 +896,7 @@ mod tests {
             ("draw", GameStatus::Draw),
             ("aborted", GameStatus::Aborted),
             ("timeout", GameStatus::Timeout),
-            ("outoftime", GameStatus::Outoftime),
+            ("outoftime", GameStatus::OutOfTime),
         ] {
             let json = format!(r#"{{"moves":"","status":"{input}"}}"#);
             let state = parse_state_data(&json).unwrap();
