@@ -2,7 +2,7 @@ use shakmaty::{Bitboard, ByColor, Chess, Move};
 
 use crate::feedback::{BoardFeedback, StatusKind, compute_feedback};
 use crate::game_logic::{GameEngine, GameState};
-use crate::opponent::Opponent;
+use crate::player::Player;
 use crate::recovery::recovery_feedback;
 
 /// Result of processing one sensor frame.
@@ -23,7 +23,7 @@ pub struct TickResult {
 /// `engine.tick()` → opponent handling → feedback computation → recovery fallback.
 pub struct GameSession {
     engine: GameEngine,
-    opponent: Option<Box<dyn Opponent>>,
+    opponent: Option<Box<dyn Player>>,
 }
 
 impl Default for GameSession {
@@ -43,7 +43,7 @@ impl GameSession {
 
     /// Create a session from the standard starting position with an opponent.
     /// The human plays White; the opponent controls Black.
-    pub fn with_opponent(opponent: Box<dyn Opponent>) -> Self {
+    pub fn with_opponent(opponent: Box<dyn Player>) -> Self {
         Self {
             engine: GameEngine::from_position_for_color(
                 Chess::default(),
@@ -55,7 +55,7 @@ impl GameSession {
 
     /// Create a session from a specific position with an opponent.
     /// The human plays White; the opponent controls Black.
-    pub fn from_position_with_opponent(position: Chess, opponent: Box<dyn Opponent>) -> Self {
+    pub fn from_position_with_opponent(position: Chess, opponent: Box<dyn Player>) -> Self {
         Self {
             engine: GameEngine::from_position_for_color(position, Some(shakmaty::Color::White)),
             opponent: Some(opponent),
@@ -81,7 +81,11 @@ impl GameSession {
         };
 
         // Merge error status AFTER recovery fallback so recovery squares still appear
-        if self.opponent.as_ref().is_some_and(|o| o.has_error()) {
+        if self
+            .opponent
+            .as_ref()
+            .is_some_and(|o| o.status() == crate::player::PlayerStatus::Error)
+        {
             feedback = feedback.with_merged_status(StatusKind::Failure);
         }
 
@@ -111,12 +115,13 @@ impl GameSession {
         let Some(human_move) = state.human_move() else {
             return;
         };
-        opponent.start_thinking(self.engine.position(), human_move);
+        opponent.opponent_moved(self.engine.position(), human_move);
     }
 
     fn poll_opponent_move(&mut self) -> Option<Move> {
         let opponent = self.opponent.as_mut()?;
-        let reply = opponent.poll_move(self.engine.position())?;
+        let sensors = self.engine.expected_positions();
+        let reply = opponent.poll_move(self.engine.position(), sensors)?;
         match self.engine.apply_opponent_move(&reply) {
             Ok(()) => Some(reply),
             Err(e) => {
@@ -132,7 +137,7 @@ mod tests {
     use super::*;
     use crate::feedback::{FeedbackSource, SquareFeedback};
     use crate::mock::ScriptedSensor;
-    use crate::opponent::EmbeddedEngine;
+    use crate::player::EmbeddedEngine;
     use shakmaty::{Color, Position, Square};
 
     /// Helper: push script, drain through session, return last TickResult.
@@ -166,16 +171,16 @@ mod tests {
     }
 
     #[cfg(test)]
-    impl Opponent for DelayedOpponent {
-        fn start_thinking(&mut self, position: &Chess, _human_move: &Move) {
+    impl Player for DelayedOpponent {
+        fn opponent_moved(&mut self, position: &Chess, _opponent_move: &Move) {
             // Pick first legal move
             let moves = position.legal_moves();
             self.pending = moves.into_iter().next();
-            // Add 1 to delay_ticks because the first poll_move call happens in the same tick as start_thinking
+            // Add 1 to delay_ticks because the first poll_move call happens in the same tick as opponent_moved
             self.ticks_remaining = self.delay_ticks + 1;
         }
 
-        fn poll_move(&mut self, _position: &Chess) -> Option<Move> {
+        fn poll_move(&mut self, _position: &Chess, _sensors: ByColor<Bitboard>) -> Option<Move> {
             if self.ticks_remaining > 0 {
                 self.ticks_remaining -= 1;
                 None
@@ -194,17 +199,21 @@ mod tests {
     }
 
     #[cfg(test)]
-    impl Opponent for ErrorOpponent {
-        fn start_thinking(&mut self, _position: &Chess, _human_move: &Move) {
+    impl Player for ErrorOpponent {
+        fn opponent_moved(&mut self, _position: &Chess, _opponent_move: &Move) {
             self.errored = true;
         }
 
-        fn poll_move(&mut self, _position: &Chess) -> Option<Move> {
+        fn poll_move(&mut self, _position: &Chess, _sensors: ByColor<Bitboard>) -> Option<Move> {
             None
         }
 
-        fn has_error(&self) -> bool {
-            self.errored
+        fn status(&self) -> crate::player::PlayerStatus {
+            if self.errored {
+                crate::player::PlayerStatus::Error
+            } else {
+                crate::player::PlayerStatus::Active
+            }
         }
     }
 

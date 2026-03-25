@@ -5,7 +5,7 @@ use std::time::Duration;
 use shakmaty::uci::UciMove;
 use shakmaty::{Chess, Color, Move};
 
-use crate::opponent::Opponent;
+use crate::player::{Player, PlayerStatus};
 
 /// Timeout for worker startup. Must be longer than the stream connection timeout
 /// (60s in esp32/lichess.rs) to avoid false failures on slow networks.
@@ -145,18 +145,15 @@ pub struct LichessOpponent {
     game_over: bool,
 }
 
-impl Opponent for LichessOpponent {
-    fn start_thinking(&mut self, _position: &Chess, human_move: &Move) {
+impl Player for LichessOpponent {
+    fn opponent_moved(&mut self, _position: &Chess, opponent_move: &Move) {
         if self.error || self.game_over {
             return;
         }
-        let uci = UciMove::from_standard(*human_move).to_string();
+        let uci = UciMove::from_standard(*opponent_move).to_string();
         match self.player_move_tx.try_send(uci) {
             Ok(()) => {}
             Err(mpsc::TrySendError::Full(_)) => {
-                // Worker hasn't consumed the previous move yet — this
-                // shouldn't happen in normal play but avoids blocking
-                // the main sensor/LED loop if it does.
                 log::warn!("Lichess worker busy, dropping move");
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
@@ -166,7 +163,11 @@ impl Opponent for LichessOpponent {
         }
     }
 
-    fn poll_move(&mut self, position: &Chess) -> Option<Move> {
+    fn poll_move(
+        &mut self,
+        position: &Chess,
+        _sensors: shakmaty::ByColor<shakmaty::Bitboard>,
+    ) -> Option<Move> {
         if self.error || self.game_over {
             return None;
         }
@@ -207,8 +208,14 @@ impl Opponent for LichessOpponent {
         }
     }
 
-    fn has_error(&self) -> bool {
-        self.error
+    fn status(&self) -> PlayerStatus {
+        if self.error {
+            PlayerStatus::Error
+        } else if self.game_over {
+            PlayerStatus::GameOver
+        } else {
+            PlayerStatus::Active
+        }
     }
 }
 
@@ -465,8 +472,15 @@ pub(crate) fn parse_state_data(json: &str) -> Result<GameStateData, String> {
 mod tests {
     use super::*;
     use shakmaty::uci::UciMove;
-    use shakmaty::{Chess, Position};
+    use shakmaty::{Bitboard, ByColor, Chess, Position};
     use std::str::FromStr;
+
+    fn empty_sensors() -> ByColor<Bitboard> {
+        ByColor {
+            white: Bitboard::EMPTY,
+            black: Bitboard::EMPTY,
+        }
+    }
 
     struct MockStream {
         events: Vec<Result<GameEvent, String>>,
@@ -579,7 +593,7 @@ mod tests {
         let human_uci = UciMove::from_str("e2e4").unwrap();
         let human_move = human_uci.to_move(&position).unwrap();
 
-        opponent.start_thinking(&position, &human_move);
+        opponent.opponent_moved(&position, &human_move);
 
         // Poll until the AI move arrives (with timeout)
         let after_human = {
@@ -590,7 +604,7 @@ mod tests {
 
         let mut ai_move = None;
         for _ in 0..100 {
-            ai_move = opponent.poll_move(&after_human);
+            ai_move = opponent.poll_move(&after_human, empty_sensors());
             if ai_move.is_some() {
                 break;
             }
@@ -600,7 +614,7 @@ mod tests {
         let ai_move = ai_move.expect("should receive AI move");
         let ai_uci = UciMove::from_standard(ai_move).to_string();
         assert_eq!(ai_uci, "e7e5");
-        assert!(!opponent.has_error());
+        assert!(opponent.status() != PlayerStatus::Error);
     }
 
     #[test]
@@ -644,7 +658,7 @@ mod tests {
         let human_uci = UciMove::from_str("e2e4").unwrap();
         let human_move = human_uci.to_move(&position).unwrap();
 
-        opponent.start_thinking(&position, &human_move);
+        opponent.opponent_moved(&position, &human_move);
 
         let after_human = {
             let mut pos = position.clone();
@@ -654,14 +668,14 @@ mod tests {
 
         // Poll until error is detected
         for _ in 0..100 {
-            let _ = opponent.poll_move(&after_human);
-            if opponent.has_error() {
+            let _ = opponent.poll_move(&after_human, empty_sensors());
+            if opponent.status() == PlayerStatus::Error {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        assert!(opponent.has_error());
+        assert!(opponent.status() == PlayerStatus::Error);
     }
 
     #[test]
@@ -705,7 +719,7 @@ mod tests {
         let pos0 = Chess::default();
         let human1_uci = UciMove::from_str("e2e4").unwrap();
         let human1_move = human1_uci.to_move(&pos0).unwrap();
-        opponent.start_thinking(&pos0, &human1_move);
+        opponent.opponent_moved(&pos0, &human1_move);
 
         let pos1 = {
             let mut p = pos0.clone();
@@ -716,7 +730,7 @@ mod tests {
         // Poll for AI's first reply (e7e5)
         let mut ai_move1 = None;
         for _ in 0..100 {
-            ai_move1 = opponent.poll_move(&pos1);
+            ai_move1 = opponent.poll_move(&pos1, empty_sensors());
             if ai_move1.is_some() {
                 break;
             }
@@ -732,7 +746,7 @@ mod tests {
         // Move 2: human plays d1h5
         let human2_uci = UciMove::from_str("d1h5").unwrap();
         let human2_move = human2_uci.to_move(&pos2).unwrap();
-        opponent.start_thinking(&pos2, &human2_move);
+        opponent.opponent_moved(&pos2, &human2_move);
 
         let pos3 = {
             let mut p = pos2.clone();
@@ -743,7 +757,7 @@ mod tests {
         // Poll for AI's second reply (a7a6) — this should also trigger game over
         let mut ai_move2 = None;
         for _ in 0..100 {
-            ai_move2 = opponent.poll_move(&pos3);
+            ai_move2 = opponent.poll_move(&pos3, empty_sensors());
             if ai_move2.is_some() {
                 break;
             }
@@ -754,15 +768,21 @@ mod tests {
         // Now poll again — should get GameOver, setting game_over flag
         // The game_over flag is set on the next poll_move call
         for _ in 0..100 {
-            let _ = opponent.poll_move(&pos3);
-            if opponent.game_over {
+            let _ = opponent.poll_move(&pos3, empty_sensors());
+            if opponent.status() == PlayerStatus::GameOver {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        assert!(opponent.game_over, "game should be over after checkmate");
-        assert!(!opponent.has_error(), "game over is not an error");
+        assert!(
+            opponent.status() == PlayerStatus::GameOver,
+            "game should be over after checkmate"
+        );
+        assert!(
+            opponent.status() != PlayerStatus::Error,
+            "game over is not an error"
+        );
     }
 
     // --- JSON parser tests ---

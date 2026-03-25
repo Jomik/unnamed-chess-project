@@ -1,5 +1,7 @@
+mod embedded;
 mod human;
 
+pub use embedded::EmbeddedEngine;
 pub use human::HumanPlayer;
 
 use shakmaty::{Bitboard, ByColor, Chess, Move};

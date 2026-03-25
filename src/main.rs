@@ -9,7 +9,7 @@ fn main() {
     use unnamed_chess_project::esp32::config::{LedPalette, SensorConfig};
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, WifiConnection};
     use unnamed_chess_project::feedback::{BoardFeedback, StatusKind};
-    use unnamed_chess_project::opponent::EmbeddedEngine;
+    use unnamed_chess_project::player::EmbeddedEngine;
     use unnamed_chess_project::session::GameSession;
     use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
@@ -103,7 +103,7 @@ fn main() {
         log::warn!("LED clear failed: {e}");
     }
 
-    let opponent: Box<dyn unnamed_chess_project::opponent::Opponent> =
+    let opponent: Box<dyn unnamed_chess_project::player::Player> =
         match option_env!("LICHESS_API_TOKEN") {
             Some(token) if _wifi.is_some() => {
                 use unnamed_chess_project::esp32::Esp32LichessClient;

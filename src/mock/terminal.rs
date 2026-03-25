@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use super::ScriptedSensor;
 use crate::feedback::{BoardFeedback, FeedbackSource, SquareFeedback};
 use crate::game_logic::GameEngine;
-use crate::opponent::EmbeddedEngine;
+use crate::player::EmbeddedEngine;
 use crate::session::{GameSession, TickResult};
 use shakmaty::Piece;
 use shakmaty::{
