@@ -4,6 +4,7 @@ pub mod feedback;
 pub mod game_logic;
 pub mod lichess;
 pub mod opponent;
+pub mod player;
 pub mod recovery;
 pub mod session;
 pub mod setup;
