@@ -5,11 +5,10 @@ fn main() {
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
     use esp_idf_svc::nvs::EspDefaultNvsPartition;
-    use shakmaty::{Bitboard, ByColor};
     use unnamed_chess_project::esp32::config::{LedPalette, SensorConfig};
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, WifiConnection};
     use unnamed_chess_project::feedback::{BoardFeedback, StatusKind};
-    use unnamed_chess_project::opponent::EmbeddedEngine;
+    use unnamed_chess_project::player::EmbeddedEngine;
     use unnamed_chess_project::session::GameSession;
     use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
@@ -103,7 +102,7 @@ fn main() {
         log::warn!("LED clear failed: {e}");
     }
 
-    let opponent: Box<dyn unnamed_chess_project::opponent::Opponent> =
+    let opponent: Box<dyn unnamed_chess_project::player::Player> =
         match option_env!("LICHESS_API_TOKEN") {
             Some(token) if _wifi.is_some() => {
                 use unnamed_chess_project::esp32::Esp32LichessClient;
@@ -166,11 +165,17 @@ fn main() {
                 }))
             }
         };
-    let mut session = GameSession::with_opponent(opponent);
-    let mut prev = ByColor {
-        white: Bitboard::EMPTY,
-        black: Bitboard::EMPTY,
+    use unnamed_chess_project::player::HumanPlayer;
+
+    let initial_positions = match sensor.read_positions() {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("Initial sensor read failed: {e}");
+            return;
+        }
     };
+    let mut session = GameSession::new(Box::new(HumanPlayer::new(initial_positions)), opponent);
+    let mut prev = initial_positions;
     log::info!("Game loop started");
 
     loop {
@@ -202,13 +207,10 @@ fn main() {
         }
         prev = positions;
 
-        let result = session.process_positions(positions);
+        let result = session.tick(positions);
 
-        if let Some(mv) = result.state.human_move() {
-            log::info!("Human plays: {mv}");
-        }
-        if let Some(mv) = &result.computer_move {
-            log::info!("Computer plays: {mv}");
+        if let Some(mv) = &result.last_move {
+            log::info!("Move played: {mv}");
         }
 
         if let Err(e) = display.show(&result.feedback) {

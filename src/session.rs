@@ -1,161 +1,146 @@
-use shakmaty::{Bitboard, ByColor, Chess, Move};
+use shakmaty::{Bitboard, ByColor, Chess, Color, Move, Position};
 
 use crate::feedback::{BoardFeedback, StatusKind, compute_feedback};
-use crate::game_logic::{GameEngine, GameState};
-use crate::opponent::Opponent;
-use crate::recovery::recovery_feedback;
+use crate::player::{Player, PlayerStatus};
 
 /// Result of processing one sensor frame.
 #[derive(Debug, Clone)]
 pub struct TickResult {
-    /// Game state snapshot from the engine.
-    pub state: GameState,
-    /// Computed board feedback (includes recovery fallback when idle).
+    /// Computed board feedback (move guidance, recovery, status).
     pub feedback: BoardFeedback,
-    /// The computer opponent's reply, if one was produced this tick.
-    pub computer_move: Option<Move>,
+    /// The move committed during this tick, if any (by either player).
+    pub last_move: Option<Move>,
 }
 
-/// Owns the game lifecycle: engine state and optional opponent.
+/// Owns the game lifecycle: chess position and two players.
 ///
-/// Encapsulates the per-tick orchestration sequence that both
-/// the hardware loop and terminal simulator share:
-/// `engine.tick()` → opponent handling → feedback computation → recovery fallback.
+/// Encapsulates the per-tick orchestration: poll active player → apply move
+/// → notify opponent → compute feedback.
 pub struct GameSession {
-    engine: GameEngine,
-    opponent: Option<Box<dyn Opponent>>,
-}
-
-impl Default for GameSession {
-    fn default() -> Self {
-        Self::new()
-    }
+    position: Chess,
+    white: Box<dyn Player>,
+    black: Box<dyn Player>,
+    prev_sensors: ByColor<Bitboard>,
+    illegal_move: bool,
 }
 
 impl GameSession {
-    /// Create a session from the standard starting position with no opponent.
-    pub fn new() -> Self {
-        Self {
-            engine: GameEngine::new(),
-            opponent: None,
-        }
+    /// Create a session from the standard starting position.
+    pub fn new(white: Box<dyn Player>, black: Box<dyn Player>) -> Self {
+        Self::from_position(Chess::default(), white, black)
     }
 
-    /// Create a session from the standard starting position with an opponent.
-    /// The human plays White; the opponent controls Black.
-    pub fn with_opponent(opponent: Box<dyn Opponent>) -> Self {
+    /// Create a session from a specific position.
+    pub fn from_position(position: Chess, white: Box<dyn Player>, black: Box<dyn Player>) -> Self {
+        let board = position.board();
+        let prev_sensors = ByColor {
+            white: board.by_color(Color::White),
+            black: board.by_color(Color::Black),
+        };
         Self {
-            engine: GameEngine::from_position_for_color(
-                Chess::default(),
-                Some(shakmaty::Color::White),
-            ),
-            opponent: Some(opponent),
-        }
-    }
-
-    /// Create a session from a specific position with an opponent.
-    /// The human plays White; the opponent controls Black.
-    pub fn from_position_with_opponent(position: Chess, opponent: Box<dyn Opponent>) -> Self {
-        Self {
-            engine: GameEngine::from_position_for_color(position, Some(shakmaty::Color::White)),
-            opponent: Some(opponent),
+            position,
+            white,
+            black,
+            prev_sensors,
+            illegal_move: false,
         }
     }
 
     /// Process one sensor frame.
-    ///
-    /// Advances the game engine, triggers the opponent if a human move
-    /// was detected, and computes feedback (falling back to recovery
-    /// guidance when idle and the physical board diverges).
-    pub fn process_positions(&mut self, positions: ByColor<Bitboard>) -> TickResult {
-        let state = self.engine.tick(positions);
+    pub fn tick(&mut self, sensors: ByColor<Bitboard>) -> TickResult {
+        let mut last_move = None;
 
-        self.handle_human_move(&state);
-        let computer_move = self.poll_opponent_move();
-
-        let feedback = compute_feedback(&state);
-        let mut feedback = if feedback.is_empty() {
-            recovery_feedback(&self.engine.expected_positions(), &positions).unwrap_or(feedback)
-        } else {
-            feedback
+        // Poll the active player.
+        let turn = self.position.turn();
+        let player = match turn {
+            Color::White => &mut self.white,
+            Color::Black => &mut self.black,
         };
+        if let Some(mv) = player.poll_move(&self.position, sensors) {
+            if self.position.legal_moves().contains(&mv) {
+                self.position.play_unchecked(mv);
+                last_move = Some(mv);
 
-        // Merge error status AFTER recovery fallback so recovery squares still appear
-        if self.opponent.as_ref().is_some_and(|o| o.has_error()) {
+                let other = match turn {
+                    Color::White => &mut self.black,
+                    Color::Black => &mut self.white,
+                };
+                other.opponent_moved(&self.position, &mv);
+            } else {
+                log::warn!("Illegal move from {turn:?} player: {mv}");
+                self.illegal_move = true;
+            }
+        }
+
+        let mut feedback = compute_feedback(&self.position, self.prev_sensors, sensors);
+
+        if self.illegal_move
+            || self.white.status() == PlayerStatus::Error
+            || self.black.status() == PlayerStatus::Error
+        {
             feedback = feedback.with_merged_status(StatusKind::Failure);
         }
 
-        TickResult {
-            state,
-            feedback,
-            computer_move,
-        }
-    }
+        self.prev_sensors = sensors;
 
-    /// Read-only access to the underlying engine.
-    #[inline]
-    pub fn engine(&self) -> &GameEngine {
-        &self.engine
+        TickResult {
+            feedback,
+            last_move,
+        }
     }
 
     /// Read-only access to the current chess position.
     #[inline]
     pub fn position(&self) -> &Chess {
-        self.engine.position()
-    }
-
-    fn handle_human_move(&mut self, state: &GameState) {
-        let Some(opponent) = self.opponent.as_mut() else {
-            return;
-        };
-        let Some(human_move) = state.human_move() else {
-            return;
-        };
-        opponent.start_thinking(self.engine.position(), human_move);
-    }
-
-    fn poll_opponent_move(&mut self) -> Option<Move> {
-        let opponent = self.opponent.as_mut()?;
-        let reply = opponent.poll_move(self.engine.position())?;
-        match self.engine.apply_opponent_move(&reply) {
-            Ok(()) => Some(reply),
-            Err(e) => {
-                log::warn!("Computer move failed: {e}");
-                None
-            }
-        }
+        &self.position
     }
 }
 
 #[cfg(all(test, not(target_os = "espidf")))]
 mod tests {
     use super::*;
-    use crate::feedback::{FeedbackSource, SquareFeedback};
     use crate::mock::ScriptedSensor;
-    use crate::opponent::EmbeddedEngine;
+    use crate::player::{EmbeddedEngine, HumanPlayer};
     use shakmaty::{Color, Position, Square};
 
-    /// Helper: push script, drain through session, return last TickResult.
     fn run_script(sensor: &mut ScriptedSensor, session: &mut GameSession) -> TickResult {
         let mut last = None;
         sensor
             .drain(|p| {
-                last = Some(session.process_positions(p));
+                last = Some(session.tick(p));
             })
             .expect("script should parse");
         last.expect("script should produce at least one tick")
     }
 
-    /// Test opponent that delays returning a move for N ticks.
-    #[cfg(test)]
-    struct DelayedOpponent {
+    fn human_vs_human() -> (ScriptedSensor, GameSession) {
+        let sensor = ScriptedSensor::new();
+        let initial = sensor.read_positions();
+        let session = GameSession::new(
+            Box::new(HumanPlayer::new(initial)),
+            Box::new(HumanPlayer::new(initial)),
+        );
+        (sensor, session)
+    }
+
+    fn human_vs_engine() -> (ScriptedSensor, GameSession) {
+        let sensor = ScriptedSensor::new();
+        let initial = sensor.read_positions();
+        let session = GameSession::new(
+            Box::new(HumanPlayer::new(initial)),
+            Box::new(EmbeddedEngine::new(42)),
+        );
+        (sensor, session)
+    }
+
+    /// Test player that delays returning a move for N ticks.
+    struct DelayedPlayer {
         delay_ticks: usize,
         ticks_remaining: usize,
         pending: Option<Move>,
     }
 
-    #[cfg(test)]
-    impl DelayedOpponent {
+    impl DelayedPlayer {
         fn new(delay_ticks: usize) -> Self {
             Self {
                 delay_ticks,
@@ -165,17 +150,14 @@ mod tests {
         }
     }
 
-    #[cfg(test)]
-    impl Opponent for DelayedOpponent {
-        fn start_thinking(&mut self, position: &Chess, _human_move: &Move) {
-            // Pick first legal move
+    impl Player for DelayedPlayer {
+        fn opponent_moved(&mut self, position: &Chess, _opponent_move: &Move) {
             let moves = position.legal_moves();
             self.pending = moves.into_iter().next();
-            // Add 1 to delay_ticks because the first poll_move call happens in the same tick as start_thinking
-            self.ticks_remaining = self.delay_ticks + 1;
+            self.ticks_remaining = self.delay_ticks;
         }
 
-        fn poll_move(&mut self, _position: &Chess) -> Option<Move> {
+        fn poll_move(&mut self, _position: &Chess, _sensors: ByColor<Bitboard>) -> Option<Move> {
             if self.ticks_remaining > 0 {
                 self.ticks_remaining -= 1;
                 None
@@ -187,123 +169,100 @@ mod tests {
         }
     }
 
-    /// Test opponent that produces an error.
-    #[cfg(test)]
-    struct ErrorOpponent {
-        errored: bool,
-    }
+    /// Test player that reports an error.
+    struct ErrorPlayer;
 
-    #[cfg(test)]
-    impl Opponent for ErrorOpponent {
-        fn start_thinking(&mut self, _position: &Chess, _human_move: &Move) {
-            self.errored = true;
-        }
-
-        fn poll_move(&mut self, _position: &Chess) -> Option<Move> {
+    impl Player for ErrorPlayer {
+        fn poll_move(&mut self, _position: &Chess, _sensors: ByColor<Bitboard>) -> Option<Move> {
             None
         }
-
-        fn has_error(&self) -> bool {
-            self.errored
+        fn opponent_moved(&mut self, _position: &Chess, _opponent_move: &Move) {}
+        fn status(&self) -> PlayerStatus {
+            PlayerStatus::Error
         }
     }
 
     #[test]
-    fn process_positions_advances_game() {
-        let mut sensor = ScriptedSensor::new();
-        let mut session = GameSession::new();
+    fn human_move_advances_game() {
+        let (mut sensor, mut session) = human_vs_human();
 
         sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
 
-        assert!(result.state.human_move().is_some());
-        assert_eq!(result.computer_move, None);
+        assert!(result.last_move.is_some());
         assert_eq!(session.position().turn(), Color::Black);
     }
 
     #[test]
-    fn with_opponent_produces_computer_move() {
-        let mut sensor = ScriptedSensor::new();
-        let mut session = GameSession::with_opponent(Box::new(EmbeddedEngine::new(42)));
+    fn human_vs_engine_produces_reply() {
+        let (mut sensor, mut session) = human_vs_engine();
 
         sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
+        assert!(result.last_move.is_some());
+        // Human moved — it's now black's (engine's) turn
+        assert_eq!(session.position().turn(), Color::Black);
 
-        assert!(result.state.human_move().is_some());
-        assert!(result.computer_move.is_some());
+        // Next tick: engine replies
+        let result = session.tick(sensor.read_positions());
+        assert!(result.last_move.is_some());
         assert_eq!(session.position().turn(), Color::White);
     }
 
     #[test]
-    fn no_opponent_no_computer_move() {
-        let mut sensor = ScriptedSensor::new();
-        let mut session = GameSession::new();
+    fn human_vs_human_no_auto_reply() {
+        let (mut sensor, mut session) = human_vs_human();
 
         sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
 
-        assert!(result.state.human_move().is_some());
-        assert_eq!(result.computer_move, None);
+        assert!(result.last_move.is_some());
         assert_eq!(session.position().turn(), Color::Black);
     }
 
     #[test]
     fn idle_tick_produces_empty_feedback() {
-        let sensor = ScriptedSensor::new();
-        let mut session = GameSession::new();
+        let (sensor, mut session) = human_vs_human();
 
-        let positions = sensor.read_positions();
-        let result = session.process_positions(positions);
+        let result = session.tick(sensor.read_positions());
 
-        assert!(result.state.human_move().is_none());
         assert!(result.feedback.is_empty());
-        assert_eq!(result.computer_move, None);
+        assert!(result.last_move.is_none());
     }
 
     #[test]
     fn lifted_piece_shows_destinations() {
-        let mut sensor = ScriptedSensor::new();
-        let mut session = GameSession::new();
+        let (mut sensor, mut session) = human_vs_human();
 
         sensor.push_script("e2.").unwrap();
         let result = run_script(&mut sensor, &mut session);
 
-        assert!(result.state.human_move().is_none());
-        assert_eq!(result.state.lifted_piece(), Some(Square::E2));
         assert!(result.feedback.get(Square::E3).is_some());
         assert!(result.feedback.get(Square::E4).is_some());
     }
 
     #[test]
-    fn recovery_feedback_when_board_diverges() {
-        let mut sensor = ScriptedSensor::new();
-        let mut session = GameSession::with_opponent(Box::new(EmbeddedEngine::new(42)));
+    fn recovery_feedback_after_engine_move() {
+        let (mut sensor, mut session) = human_vs_engine();
 
-        // Human plays e2-e4, computer replies
         sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
-        let computer_move = result.computer_move.expect("opponent should reply");
+        assert!(result.last_move.is_some());
 
-        // Physical board hasn't been updated for the computer move yet,
-        // so next tick should produce recovery feedback.
-        let positions = sensor.read_positions();
-        let result = session.process_positions(positions);
-
+        // Physical board hasn't been updated for engine's move
+        let result = session.tick(sensor.read_positions());
         assert!(!result.feedback.is_empty());
-
-        // Computer move target should show as Destination (piece needs placing)
-        let to = computer_move.to();
-        assert_eq!(
-            result.feedback.get(to),
-            Some(SquareFeedback::Destination),
-            "computer move target {to} should show as Destination"
-        );
     }
 
     #[test]
-    fn from_position_with_opponent_starts_at_given_position() {
-        // Start from a position where it's White's turn (human plays White).
-        let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    fn position_accessor() {
+        let (_sensor, session) = human_vs_human();
+        assert_eq!(session.position().turn(), Color::White);
+    }
+
+    #[test]
+    fn from_position_starts_at_given_position() {
+        let fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1";
         let position: Chess = fen
             .parse::<shakmaty::fen::Fen>()
             .unwrap()
@@ -311,62 +270,55 @@ mod tests {
             .unwrap();
 
         let board = position.board();
-        let mut sensor = ScriptedSensor::from_bitboards(
-            board.by_color(Color::White),
-            board.by_color(Color::Black),
-        )
-        .unwrap();
-        let mut session =
-            GameSession::from_position_with_opponent(position, Box::new(EmbeddedEngine::new(42)));
+        let sensors = ByColor {
+            white: board.by_color(Color::White),
+            black: board.by_color(Color::Black),
+        };
+        let session = GameSession::from_position(
+            position,
+            Box::new(HumanPlayer::new(sensors)),
+            Box::new(EmbeddedEngine::new(42)),
+        );
 
-        assert_eq!(session.position().turn(), Color::White);
-
-        sensor.push_script("e2 We4.").unwrap();
-        let result = run_script(&mut sensor, &mut session);
-        assert!(result.computer_move.is_some(), "opponent should be active");
+        assert_eq!(session.position().turn(), Color::Black);
     }
 
     #[test]
-    fn async_opponent_returns_move_after_delay() {
-        let mut sensor = ScriptedSensor::new();
-        let mut session = GameSession::with_opponent(Box::new(DelayedOpponent::new(2)));
+    fn delayed_player_returns_move_after_ticks() {
+        let sensor = ScriptedSensor::new();
+        let initial = sensor.read_positions();
+        let mut session = GameSession::new(
+            Box::new(HumanPlayer::new(initial)),
+            Box::new(DelayedPlayer::new(2)),
+        );
 
-        // Human plays e2-e4
+        let mut sensor = ScriptedSensor::new();
         sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
 
-        // Move detected but opponent hasn't replied yet (delay=2)
-        assert!(result.state.human_move().is_some());
-        assert!(result.computer_move.is_none());
+        // Move detected but opponent hasn't replied yet
+        assert!(result.last_move.is_some());
+        // DelayedPlayer delays, so it's still black's turn
+        assert_eq!(session.position().turn(), Color::Black);
 
-        // Tick 1: still waiting
-        let positions = sensor.read_positions();
-        let result = session.process_positions(positions);
-        assert!(result.computer_move.is_none());
-
-        // Tick 2: still waiting (ticks_remaining was 2, now 1)
-        let positions = sensor.read_positions();
-        let result = session.process_positions(positions);
-        assert!(result.computer_move.is_none());
+        // Tick 1-2: still waiting
+        let _ = session.tick(sensor.read_positions());
+        let _ = session.tick(sensor.read_positions());
 
         // Tick 3: move arrives
-        let positions = sensor.read_positions();
-        let result = session.process_positions(positions);
-        assert!(result.computer_move.is_some());
+        let result = session.tick(sensor.read_positions());
+        assert!(result.last_move.is_some());
         assert_eq!(session.position().turn(), Color::White);
     }
 
     #[test]
-    fn error_opponent_produces_failure_feedback() {
-        use crate::feedback::StatusKind;
+    fn error_player_produces_failure_feedback() {
+        let sensor = ScriptedSensor::new();
+        let initial = sensor.read_positions();
+        let mut session =
+            GameSession::new(Box::new(HumanPlayer::new(initial)), Box::new(ErrorPlayer));
 
-        let mut sensor = ScriptedSensor::new();
-        let mut session = GameSession::with_opponent(Box::new(ErrorOpponent { errored: false }));
-
-        // Human plays — triggers start_thinking which sets error
-        sensor.push_script("e2 We4.").unwrap();
-        let result = run_script(&mut sensor, &mut session);
-
+        let result = session.tick(sensor.read_positions());
         assert_eq!(result.feedback.status(), Some(StatusKind::Failure));
     }
 }

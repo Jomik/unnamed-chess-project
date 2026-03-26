@@ -1,26 +1,12 @@
-use shakmaty::{Chess, Move, Position, Role};
+use shakmaty::{Bitboard, ByColor, Chess, Move, Position, Role};
 
-/// Trait for computing opponent moves.
-///
-/// Separates move selection from the game engine so implementations
-/// can range from a simple heuristic to a remote engine (e.g. Lichess).
-pub trait Opponent {
-    /// React to the human's move and begin computing a response.
-    fn start_thinking(&mut self, position: &Chess, human_move: &Move);
-
-    /// Poll for a computed move. Returns `Some(move)` when ready.
-    fn poll_move(&mut self, position: &Chess) -> Option<Move>;
-
-    /// Check if the opponent encountered an error.
-    fn has_error(&self) -> bool {
-        false
-    }
-}
+use super::Player;
 
 /// Simple embedded opponent that picks a move immediately.
 ///
 /// Heuristic: prefer captures (by victim value), then castling,
 /// then queen promotions, then a random non-king move.
+#[derive(Debug)]
 pub struct EmbeddedEngine {
     pending: Option<Move>,
     rng_state: u32,
@@ -55,8 +41,12 @@ fn victim_value(role: Role) -> u8 {
     }
 }
 
-impl Opponent for EmbeddedEngine {
-    fn start_thinking(&mut self, position: &Chess, _human_move: &Move) {
+impl Player for EmbeddedEngine {
+    fn poll_move(&mut self, _position: &Chess, _sensors: ByColor<Bitboard>) -> Option<Move> {
+        self.pending.take()
+    }
+
+    fn opponent_moved(&mut self, position: &Chess, _opponent_move: &Move) {
         let moves = position.legal_moves();
         let is_allowed = |mv: &Move| mv.promotion().is_none_or(|r| r == Role::Queen);
 
@@ -88,16 +78,11 @@ impl Opponent for EmbeddedEngine {
         };
 
         let chosen = best_capture.or(castle).or(promotion).or_else(random_move);
-
         self.pending = chosen.cloned();
-    }
-
-    fn poll_move(&mut self, _position: &Chess) -> Option<Move> {
-        self.pending.take()
     }
 }
 
-#[cfg(all(test, not(target_os = "espidf")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use shakmaty::{CastlingMode, Square, fen::Fen};
@@ -120,34 +105,47 @@ mod tests {
         }
     }
 
+    fn dummy_sensors() -> ByColor<Bitboard> {
+        ByColor {
+            white: Bitboard::EMPTY,
+            black: Bitboard::EMPTY,
+        }
+    }
+
     #[test]
     fn prefers_capturing_higher_value_piece() {
         // Black knight on c4 can capture queen on d2 or pawn on e3
         let pos = position_from_fen("8/8/8/8/2n5/4P3/3Q4/4K1k1 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move(&pos).expect("should have a move");
+        engine.opponent_moved(&pos, &dummy_move());
+        let mv = engine
+            .poll_move(&pos, dummy_sensors())
+            .expect("should have a move");
         assert!(mv.is_capture());
         assert_eq!(mv.capture(), Some(Role::Queen));
     }
 
     #[test]
     fn picks_non_capture_when_no_captures_available() {
-        // Starting position for black — no captures possible
+        // After 1. e4 — black has no captures available
         let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move(&pos).expect("should have a move");
+        engine.opponent_moved(&pos, &dummy_move());
+        let mv = engine
+            .poll_move(&pos, dummy_sensors())
+            .expect("should have a move");
         assert!(!mv.is_capture());
     }
 
     #[test]
     fn prefers_castling_over_regular_moves() {
-        // Black can castle kingside: king on e8, rook on h8, no pieces between
+        // Black can castle both sides
         let pos = position_from_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move(&pos).expect("should have a move");
+        engine.opponent_moved(&pos, &dummy_move());
+        let mv = engine
+            .poll_move(&pos, dummy_sensors())
+            .expect("should have a move");
         assert!(matches!(mv, Move::Castle { .. }));
     }
 
@@ -156,19 +154,23 @@ mod tests {
         // Black pawn on d2 about to promote
         let pos = position_from_fen("8/8/8/8/8/k7/3p4/K7 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move(&pos).expect("should have a move");
+        engine.opponent_moved(&pos, &dummy_move());
+        let mv = engine
+            .poll_move(&pos, dummy_sensors())
+            .expect("should have a move");
         assert_eq!(mv.promotion(), Some(Role::Queen));
     }
 
     #[test]
     fn avoids_king_moves_when_other_pieces_can_move() {
-        // Black king on g8, knight on f6 — should move the knight, not the king
+        // Black king on g8, knight on f6 — should prefer knight moves
         let pos = position_from_fen("6k1/8/5n2/8/8/8/8/4K3 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         for _ in 0..20 {
-            engine.start_thinking(&pos, &dummy_move());
-            let mv = engine.poll_move(&pos).expect("should have a move");
+            engine.opponent_moved(&pos, &dummy_move());
+            let mv = engine
+                .poll_move(&pos, dummy_sensors())
+                .expect("should have a move");
             assert_ne!(mv.role(), Role::King);
         }
     }
@@ -178,8 +180,10 @@ mod tests {
         // Lone black king — only king moves are legal
         let pos = position_from_fen("8/8/8/8/8/8/8/k3K3 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.start_thinking(&pos, &dummy_move());
-        let mv = engine.poll_move(&pos).expect("should have a move");
+        engine.opponent_moved(&pos, &dummy_move());
+        let mv = engine
+            .poll_move(&pos, dummy_sensors())
+            .expect("should have a move");
         assert_eq!(mv.role(), Role::King);
     }
 
@@ -187,16 +191,8 @@ mod tests {
     fn poll_returns_none_after_consumed() {
         let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.start_thinking(&pos, &dummy_move());
-        let _ = engine.poll_move(&pos);
-        assert!(engine.poll_move(&pos).is_none());
-    }
-
-    #[test]
-    fn poll_move_accepts_position() {
-        let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
-        let mut engine = EmbeddedEngine::new(42);
-        engine.start_thinking(&pos, &dummy_move());
-        let _mv = engine.poll_move(&pos);
+        engine.opponent_moved(&pos, &dummy_move());
+        let _ = engine.poll_move(&pos, dummy_sensors());
+        assert!(engine.poll_move(&pos, dummy_sensors()).is_none());
     }
 }
