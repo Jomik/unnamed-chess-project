@@ -126,15 +126,24 @@ pub enum GameOutcome {
 ///
 /// Pure function — derives lifted piece, captured piece, check, outcome,
 /// recovery, and castle guidance entirely from the inputs.
-pub fn compute_feedback(position: &Chess, curr_sensors: ByColor<Bitboard>) -> BoardFeedback {
+///
+/// `reference_sensors` is the last known good board state (used to suppress guidance
+/// for pieces that were never physically present in this interaction cycle).
+pub fn compute_feedback(
+    position: &Chess,
+    curr_sensors: ByColor<Bitboard>,
+    reference_sensors: ByColor<Bitboard>,
+) -> BoardFeedback {
     let curr_combined = curr_sensors.white | curr_sensors.black;
+    let ref_combined = reference_sensors.white | reference_sensors.black;
 
     let turn = position.turn();
     let expected_board = position.board();
 
-    // Derive lifted and captured from expected board vs current sensors
-    let lifted = expected_board.by_color(turn) & !curr_combined;
-    let captured = expected_board.by_color(turn.other()) & !curr_combined;
+    // Derive lifted and captured from expected board vs current sensors,
+    // filtered by reference (only pieces physically present can be lifted/captured)
+    let lifted = expected_board.by_color(turn) & !curr_combined & ref_combined;
+    let captured = expected_board.by_color(turn.other()) & !curr_combined & ref_combined;
 
     // In-recovery suppression: check for divergence beyond lifted/captured
     let occupancy_diff = (expected_board.occupied() ^ curr_combined) & !lifted & !captured;
@@ -430,7 +439,7 @@ mod tests {
         let position = Chess::default();
         let sensors = starting_sensors();
 
-        let fb = compute_feedback(&position, sensors);
+        let fb = compute_feedback(&position, sensors, sensors);
 
         assert!(fb.is_empty());
     }
@@ -464,7 +473,7 @@ mod tests {
         let mut curr = prev;
         curr.white.toggle(Square::E2);
 
-        let fb = compute_feedback(&position, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::E2), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::E3), Some(SquareFeedback::Destination));
@@ -480,7 +489,7 @@ mod tests {
         let mut curr = prev;
         curr.white.toggle(Square::E4); // lift e4
 
-        let fb = compute_feedback(&position, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::E5), Some(SquareFeedback::Destination));
@@ -498,7 +507,7 @@ mod tests {
         let mut curr = prev;
         curr.black.toggle(Square::D5); // remove opponent pawn
 
-        let fb = compute_feedback(&position, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::D5), Some(SquareFeedback::Destination));
         assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Origin));
@@ -515,7 +524,7 @@ mod tests {
         curr.white.toggle(Square::E4); // lift our pawn
         curr.black.toggle(Square::D5); // remove opponent pawn
 
-        let fb = compute_feedback(&position, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::D5), Some(SquareFeedback::Destination));
@@ -532,7 +541,7 @@ mod tests {
         let mut curr = prev;
         curr.black.toggle(Square::D5); // remove en passant pawn
 
-        let fb = compute_feedback(&position, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::E5), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::D6), Some(SquareFeedback::Destination));
@@ -547,7 +556,7 @@ mod tests {
             position_from_fen("rnbqkbnr/pppp2pp/8/4pp1Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1");
         let sensors = sensors_from_position(&position);
 
-        let fb = compute_feedback(&position, sensors);
+        let fb = compute_feedback(&position, sensors, sensors);
 
         assert_eq!(fb.get(Square::E8), Some(SquareFeedback::Check));
         assert_eq!(fb.get(Square::H5), Some(SquareFeedback::Checker));
@@ -562,7 +571,7 @@ mod tests {
         let mut curr = prev;
         curr.black.toggle(Square::G8); // lift knight
 
-        let fb = compute_feedback(&position, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::G8), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::E8), None);
@@ -580,7 +589,7 @@ mod tests {
         let mut diverged = sensors;
         diverged.black.toggle(Square::A4); // phantom piece on empty square — triggers recovery
 
-        let fb = compute_feedback(&position, diverged);
+        let fb = compute_feedback(&position, diverged, diverged);
 
         // Should show recovery (extra piece), NOT check feedback
         assert_eq!(
@@ -606,7 +615,7 @@ mod tests {
         let position = position_from_fen("4k3/8/8/7B/8/8/8/4R2K b - - 0 1");
         let sensors = sensors_from_position(&position);
 
-        let fb = compute_feedback(&position, sensors);
+        let fb = compute_feedback(&position, sensors, sensors);
 
         assert_eq!(fb.get(Square::E8), Some(SquareFeedback::Check));
         assert_eq!(fb.get(Square::E1), Some(SquareFeedback::Checker));
@@ -622,7 +631,7 @@ mod tests {
             position_from_fen("rnbqkb1r/pppp1Qpp/5n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4");
         let sensors = sensors_from_position(&position);
 
-        let fb = compute_feedback(&position, sensors);
+        let fb = compute_feedback(&position, sensors, sensors);
 
         assert_eq!(fb.get(Square::E8), Some(SquareFeedback::Check));
         assert_eq!(fb.get(Square::F7), Some(SquareFeedback::Victory));
@@ -636,7 +645,7 @@ mod tests {
         let position = position_from_fen("k7/8/1QK5/8/8/8/8/8 b - - 0 1");
         let sensors = sensors_from_position(&position);
 
-        let fb = compute_feedback(&position, sensors);
+        let fb = compute_feedback(&position, sensors, sensors);
 
         assert_eq!(fb.get(Square::A8), Some(SquareFeedback::Stalemate));
         assert_eq!(fb.get(Square::C6), Some(SquareFeedback::Stalemate));
@@ -658,7 +667,7 @@ mod tests {
                 | Bitboard::from(Square::E7),
         };
 
-        let fb = compute_feedback(&position, stale);
+        let fb = compute_feedback(&position, stale, stale);
 
         assert_eq!(fb.get(Square::E7), Some(SquareFeedback::Capture));
         assert_eq!(fb.get(Square::E5), Some(SquareFeedback::Destination));
@@ -669,7 +678,7 @@ mod tests {
         let position = Chess::default();
         let sensors = starting_sensors();
 
-        let fb = compute_feedback(&position, sensors);
+        let fb = compute_feedback(&position, sensors, sensors);
 
         assert!(fb.is_empty());
     }
@@ -687,7 +696,7 @@ mod tests {
         curr.white.toggle(Square::E1); // king left e1
         curr.white.toggle(Square::G1); // king placed on g1
 
-        let fb = compute_feedback(&position, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::H1), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::F1), Some(SquareFeedback::Destination));

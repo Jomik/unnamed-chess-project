@@ -46,6 +46,10 @@ impl Player for EmbeddedEngine {
         self.pending.take()
     }
 
+    fn is_interactive(&self) -> bool {
+        false
+    }
+
     fn opponent_moved(&mut self, position: &Chess, _opponent_move: &Move) {
         let moves = position.legal_moves();
         let is_allowed = |mv: &Move| mv.promotion().is_none_or(|r| r == Role::Queen);
