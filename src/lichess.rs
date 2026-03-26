@@ -468,7 +468,7 @@ pub(crate) fn parse_state_data(json: &str) -> Result<GameStateData, String> {
     })
 }
 
-#[cfg(all(test, not(target_os = "espidf")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use shakmaty::uci::UciMove;
