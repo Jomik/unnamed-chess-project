@@ -65,10 +65,10 @@ impl Player for HumanPlayer {
     }
 }
 
-#[cfg(all(test, not(target_os = "espidf")))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock::ScriptedSensor;
+    use crate::testutil::ScriptedSensor;
     use shakmaty::{Chess, Color, Square};
 
     fn position_from_fen(fen: &str) -> Chess {

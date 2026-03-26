@@ -223,5 +223,7 @@ fn main() {
 
 #[cfg(not(target_os = "espidf"))]
 fn main() {
-    unnamed_chess_project::mock::run_interactive_terminal();
+    eprintln!(
+        "This binary targets ESP32. Use `just flash` to run on hardware, or `just test` to run tests."
+    );
 }

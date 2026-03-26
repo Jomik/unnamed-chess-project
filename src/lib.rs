@@ -8,7 +8,7 @@ pub mod setup;
 
 /// Trait for reading piece positions from the board.
 ///
-/// Abstracts over hardware sensors (ESP32) and mock/scripted inputs,
+/// Abstracts over hardware sensors (ESP32) and scripted test inputs,
 /// providing a uniform interface for the game session.
 pub trait PieceSensor {
     /// Error type for sensor read failures.
@@ -20,7 +20,7 @@ pub trait PieceSensor {
 
 /// Trait for displaying board feedback to the player.
 ///
-/// Abstracts over LED hardware (ESP32) and terminal rendering,
+/// Abstracts over LED hardware (ESP32) for displaying board feedback,
 /// providing a uniform interface for the output side of the
 /// game loop. Mirrors [`PieceSensor`] on the input side.
 pub trait BoardDisplay {
@@ -30,12 +30,12 @@ pub trait BoardDisplay {
     /// Show the given feedback state on the display.
     ///
     /// Implementations map [`feedback::SquareFeedback`] variants
-    /// to hardware-specific output (LED colors, terminal colors, etc.).
+    /// to hardware-specific output (LED colors, etc.).
     fn show(&mut self, feedback: &feedback::BoardFeedback) -> Result<(), Self::Error>;
 }
 
 #[cfg(target_os = "espidf")]
 pub mod esp32;
 
-#[cfg(not(target_os = "espidf"))]
-pub mod mock;
+#[cfg(test)]
+pub mod testutil;

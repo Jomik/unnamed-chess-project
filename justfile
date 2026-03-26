@@ -3,10 +3,6 @@ set dotenv-load
 host_target := `rustc -vV | grep host | cut -d' ' -f2`
 esp_target := "xtensa-esp32s3-espidf"
 
-# Run development simulator on host
-dev:
-    cargo run --target {{host_target}} --bin unnamed-chess-project
-
 # Run tests on host
 test *args:
     cargo test --target {{host_target}} {{args}}

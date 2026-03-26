@@ -7,7 +7,7 @@ The Smart Chess Board is an ESP32-S3-based physical chess board that detects pie
 - **Piece Detection**: Per-color piece detection using analog hall-effect sensors in an 8x8 grid.
 - **Legal Move Validation**: Real-time validation of physical chess moves using the `shakmaty` library.
 - **Visual LED Feedback**: Indicators for move destinations, captures, and check alerts.
-- **Interactive Simulator**: A terminal-based simulator for manual testing without physical hardware.
+
 
 ## Getting Started
 
@@ -40,7 +40,6 @@ sed -i'' -e "s/SET_YOUR_HOST_TARGET_HERE/$(rustc -vV | grep host | cut -d' ' -f2
 
 ```bash
 just test    # Run all tests
-just dev     # Run interactive terminal simulator
 ```
 
 ### ESP32-S3 Firmware
@@ -57,4 +56,4 @@ Run `just` with no arguments to see all available tasks.
 
 ## Development
 
-The project includes an interactive terminal simulator for manual development testing. You can also define scripted sensor states for automated tests using the BoardScript format.
+You can define scripted sensor states for automated tests using the BoardScript format (see `src/testutil/script.rs`).

@@ -96,11 +96,11 @@ impl GameSession {
     }
 }
 
-#[cfg(all(test, not(target_os = "espidf")))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock::ScriptedSensor;
     use crate::player::{EmbeddedEngine, HumanPlayer};
+    use crate::testutil::ScriptedSensor;
     use shakmaty::{Color, Position, Square};
 
     fn run_script(sensor: &mut ScriptedSensor, session: &mut GameSession) -> TickResult {

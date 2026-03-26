@@ -13,7 +13,6 @@ The default Cargo target is `xtensa-esp32s3-espidf` (set in `.cargo/config.toml`
 ```bash
 just test              # Run all host tests
 just test -- test_name # Run a single test by name
-just dev               # Run interactive terminal simulator on host
 just build             # Build ESP32 firmware (requires `cargo +esp`)
 just flash             # Flash to ESP32 and monitor serial
 ```
@@ -35,9 +34,9 @@ Two mutually exclusive code paths based on target:
 | Context | Target | Active modules |
 |---|---|---|
 | ESP32-S3 firmware | `xtensa-esp32s3-espidf` (`target_os = "espidf"`) | `esp32::*` |
-| Host (dev/test) | host triple (e.g. `aarch64-apple-darwin`) | `mock::*` |
+| Host (dev/test) | host triple (e.g. `aarch64-apple-darwin`) | `testutil::*` (test-only) |
 
-Gate with `#[cfg(target_os = "espidf")]` / `#[cfg(not(target_os = "espidf"))]`. Never mix imports across the boundary. Tests that import from `mock::*` use `#[cfg(all(test, not(target_os = "espidf")))]`; tests with no mock dependency use plain `#[cfg(test)]`.
+Gate hardware-specific code with `#[cfg(target_os = "espidf")]`. Never mix imports across the boundary. All test modules use plain `#[cfg(test)]`.
 
 ## Architecture
 
@@ -51,12 +50,12 @@ PieceSensor::read_positions() → ByColor<Bitboard>
             → BoardDisplay::show(&feedback)
 ```
 
-**GameSession** (`session.rs`) orchestrates the per-tick sequence shared by both the hardware loop and terminal simulator: poll active player → apply move → notify opponent → compute feedback.
+**GameSession** (`session.rs`) orchestrates the per-tick sequence: poll active player → apply move → notify opponent → compute feedback.
 
 ### Key Abstractions
 
-- **PieceSensor** (`lib.rs`) — sensor input (ESP32 hardware / mock scripted)
-- **BoardDisplay** (`lib.rs`) — visual output (ESP32 LEDs / terminal ANSI)
+- **PieceSensor** (`lib.rs`) — sensor input (ESP32 hardware / test scripted)
+- **BoardDisplay** (`lib.rs`) — visual output (ESP32 LEDs)
 - **Player** (`player/mod.rs`) — symmetric trait for both human and computer players
 
 ### Module Responsibilities
@@ -68,7 +67,7 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame
 - **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player`
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
-- **mock/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
+- **testutil/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
 
 ### Move Detection Constraints
 
@@ -78,7 +77,7 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 
 ### BoardScript Format (for tests)
 
-Used by `ScriptedSensor` in `mock/script.rs` and extensively in `player/human.rs` tests:
+Used by `ScriptedSensor` in `testutil/script.rs` and extensively in `player/human.rs` tests:
 
 ```
 "e2 We4."      → lift e2, place white on e4, tick
