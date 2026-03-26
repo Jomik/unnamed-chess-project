@@ -27,18 +27,18 @@ impl std::fmt::Display for Esp32LichessError {
 }
 
 pub struct Esp32LichessClient {
-    token: &'static str,
+    token: String,
 }
 
 impl Esp32LichessClient {
-    pub fn new(token: &'static str) -> Self {
+    pub fn new(token: String) -> Self {
         Self { token }
     }
 }
 
 pub struct Esp32LichessGame {
     game_id: String,
-    token: &'static str,
+    token: String,
 }
 
 impl LichessClient for Esp32LichessClient {
@@ -139,7 +139,7 @@ struct Esp32LichessStreamImpl {
     /// We read bytes directly from this via embedded_io::Read.
     stream_conn: EspHttpConnection,
     /// Token for POST Authorization header.
-    post_token: &'static str,
+    post_token: String,
     /// Game ID for constructing POST URLs.
     game_id: String,
     /// Line buffer for NDJSON parsing -- reused across reads.
@@ -147,7 +147,7 @@ struct Esp32LichessStreamImpl {
 }
 
 impl Esp32LichessStreamImpl {
-    fn connect(token: &'static str, game_id: &str) -> Result<Self, Esp32LichessError> {
+    fn connect(token: String, game_id: &str) -> Result<Self, Esp32LichessError> {
         // Stream connection: 60s timeout for steady-state reads (AI thinking time).
         // esp-idf-svc sets timeout per-connection, not per-operation.
         let stream_config = HttpConfig {

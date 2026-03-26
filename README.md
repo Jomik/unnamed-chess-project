@@ -25,10 +25,6 @@ espup install
 # Clone ESP-IDF (required for firmware builds)
 just setup-idf
 
-# Configure local environment
-cp .env.example .env
-# Edit .env with your WiFi credentials
-
 # Set up rust-analyzer for host-side editor analysis
 cp rust-analyzer.toml.example rust-analyzer.toml
 sed -i'' -e "s/SET_YOUR_HOST_TARGET_HERE/$(rustc -vV | grep host | cut -d' ' -f2)/" rust-analyzer.toml
@@ -53,6 +49,22 @@ just flash   # Flash to device and monitor serial output
 ```
 
 Run `just` with no arguments to see all available tasks.
+
+## Board Setup
+
+On first boot (or after `just erase-nvs`), the board enters provisioning mode:
+
+1. Connect to the **ChessBoard** WiFi network from your phone or computer
+2. Navigate to `192.168.71.1`
+3. Enter your WiFi credentials and optionally configure Lichess
+
+### Lichess Integration (optional)
+
+To play against the Lichess AI, create a personal access token with the required scopes:
+
+[Create token on lichess.org](https://lichess.org/account/oauth/token/create?scopes[]=board:play&scopes[]=challenge:write&description=Chess+Board)
+
+Enter this token in the provisioning form. Without a token, the board uses a built-in heuristic engine.
 
 ## Development
 

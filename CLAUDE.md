@@ -65,6 +65,8 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **player/embedded.rs** — `EmbeddedEngine`: heuristic AI (captures > castling > promotions > random)
 - **feedback.rs** — `compute_feedback`: pure function mapping (position, prev_sensors, curr_sensors) → per-square LED instructions. Recovery guidance is integrated as a fallback path.
 - **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame
+- **provisioning.rs** — `BoardConfig` struct, `ValidationError`, validation logic (platform-independent, host-testable)
+- **esp32/provisioning.rs** — NVS `load`/`save` for `BoardConfig`, SoftAP + HTTP provisioning server
 - **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player`
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
 - **testutil/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
@@ -88,9 +90,13 @@ Used by `ScriptedSensor` in `testutil/script.rs` and extensively in `player/huma
 - Squares: `e2`, `a1`, `h8`. Optional `W`/`B` color prefix required when placing on an empty square.
 - Period `.` flushes the current group and queues a tick.
 
-## Environment Variables
+## Provisioning
 
-WiFi credentials and Lichess config are compile-time `env!()` / `option_env!()` macros, loaded from `.env` via the justfile's `set dotenv-load`. Copy `.env.example` to `.env` and fill in values.
+Runtime configuration (WiFi credentials, Lichess settings) is stored in the ESP32's NVS partition, not in environment variables. On first boot (or after `just erase-nvs`), the board enters SoftAP provisioning mode — connect to the `ChessBoard` WiFi network and navigate to `192.168.71.1` to configure.
+
+The `IDF_PATH` build variable can still be set in `.env` (loaded via the justfile's `set dotenv-load`).
+
+See `docs/specs/2026-03-26-softap-provisioning-design.md` for the full design.
 
 ## Coding Conventions
 
