@@ -122,15 +122,6 @@ pub enum GameOutcome {
     },
 }
 
-/// A single physical action the player must perform to complete a move.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GuidanceStep {
-    /// Move a piece from one square to another (e.g. castling rook).
-    Move { from: Square, to: Square },
-    /// Remove a piece from the board (e.g. captured piece during computer move).
-    Remove { square: Square },
-}
-
 /// Compute visual feedback from chess position and sensor state.
 ///
 /// Pure function — derives lifted piece, captured piece, check, outcome,
@@ -168,8 +159,8 @@ pub fn compute_feedback(
 
     // Castle rook guidance: detect mid-castle where king is placed but rook hasn't moved.
     // Check BEFORE recovery — mid-castle looks like recovery (king not on expected square).
-    if let Some(step) = detect_castle_guidance(position, &curr_sensors, &legal_moves) {
-        return show_guidance_step(step);
+    if let Some(fb) = detect_castle_guidance(position, &curr_sensors, &legal_moves) {
+        return fb;
     }
 
     // Recovery: board diverges from expected position
@@ -255,7 +246,7 @@ fn detect_castle_guidance(
     position: &Chess,
     curr_sensors: &ByColor<Bitboard>,
     legal_moves: &MoveList,
-) -> Option<GuidanceStep> {
+) -> Option<BoardFeedback> {
     let turn = position.turn();
     let expected_our = position.board().by_color(turn);
     let our_current = curr_sensors[turn];
@@ -267,10 +258,10 @@ fn detect_castle_guidance(
             let king_target = side.king_to(turn);
             if newly_placed.contains(king_target) {
                 let rook_target = side.rook_to(turn);
-                return Some(GuidanceStep::Move {
-                    from: rook,
-                    to: rook_target,
-                });
+                let mut fb = BoardFeedback::new();
+                fb.set(rook, SquareFeedback::Origin);
+                fb.set(rook_target, SquareFeedback::Destination);
+                return Some(fb);
             }
         }
     }
@@ -289,20 +280,6 @@ fn resolve_lifted_piece(legal_moves: &MoveList, lifted: Bitboard) -> Option<Squa
             })
             .and_then(|mv| mv.from())
     })
-}
-
-fn show_guidance_step(step: GuidanceStep) -> BoardFeedback {
-    let mut fb = BoardFeedback::new();
-    match step {
-        GuidanceStep::Move { from, to } => {
-            fb.set(from, SquareFeedback::Origin);
-            fb.set(to, SquareFeedback::Destination);
-        }
-        GuidanceStep::Remove { square } => {
-            fb.set(square, SquareFeedback::Capture);
-        }
-    }
-    fb
 }
 
 fn show_outcome_feedback(outcome: GameOutcome) -> BoardFeedback {
