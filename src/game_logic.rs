@@ -1,4 +1,4 @@
-use crate::feedback::{CheckInfo, FeedbackSource, GameOutcome, GuidanceStep};
+use crate::feedback::{GameOutcome, GuidanceStep};
 use shakmaty::{
     Bitboard, ByColor, CastlingSide, Chess, Color, EnPassantMode, Move, MoveList, Piece, Position,
     Role, Square, fen::Fen,
@@ -27,42 +27,25 @@ pub struct GameState {
     human_move: Option<Move>,
 }
 
-impl FeedbackSource for GameState {
-    fn legal_moves(&self) -> &[Move] {
-        &self.legal_moves
-    }
-
-    fn lifted_piece(&self) -> Option<Square> {
+impl GameState {
+    pub fn lifted_piece(&self) -> Option<Square> {
         self.lifted_piece
     }
 
-    fn captured_piece(&self) -> Option<Square> {
+    pub fn captured_piece(&self) -> Option<Square> {
         self.captured_piece
     }
 
-    fn check_info(&self) -> Option<CheckInfo> {
-        if self.checkers.is_empty() {
-            None
-        } else {
-            Some(CheckInfo {
-                king_square: self.king_square,
-                checkers: self.checkers,
-            })
-        }
-    }
-
-    fn move_guidance(&self) -> Option<GuidanceStep> {
-        self.move_guidance
-    }
-
-    fn outcome(&self) -> Option<GameOutcome> {
-        self.outcome
-    }
-}
-
-impl GameState {
     pub fn human_move(&self) -> Option<&Move> {
         self.human_move.as_ref()
+    }
+
+    pub fn legal_moves(&self) -> &MoveList {
+        &self.legal_moves
+    }
+
+    pub fn is_in_check(&self) -> bool {
+        !self.checkers.is_empty()
     }
 }
 
@@ -732,7 +715,7 @@ mod tests {
         let state = engine.tick(sensor.read_positions());
 
         assert!(state.legal_moves().is_empty(), "should be checkmate");
-        assert!(state.check_info().is_some(), "king should be in check",);
+        assert!(state.is_in_check(), "king should be in check",);
         assert_piece(&engine, "f7", Role::Queen, Color::White);
     }
 
@@ -755,7 +738,7 @@ mod tests {
 
         assert!(state.legal_moves().is_empty(), "should be stalemate");
         assert!(
-            state.check_info().is_none(),
+            !state.is_in_check(),
             "should NOT be in check (stalemate, not checkmate)",
         );
     }

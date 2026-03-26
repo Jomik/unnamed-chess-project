@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use super::ScriptedSensor;
-use crate::feedback::{BoardFeedback, FeedbackSource, SquareFeedback};
+use crate::feedback::{BoardFeedback, SquareFeedback};
 use crate::game_logic::GameEngine;
 use crate::player::EmbeddedEngine;
 use crate::session::{GameSession, TickResult};

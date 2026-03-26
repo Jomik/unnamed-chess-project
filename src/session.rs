@@ -3,7 +3,6 @@ use shakmaty::{Bitboard, ByColor, Chess, Move};
 use crate::feedback::{BoardFeedback, StatusKind, compute_feedback};
 use crate::game_logic::{GameEngine, GameState};
 use crate::player::Player;
-use crate::recovery::recovery_feedback;
 
 /// Result of processing one sensor frame.
 #[derive(Debug, Clone)]
@@ -24,6 +23,7 @@ pub struct TickResult {
 pub struct GameSession {
     engine: GameEngine,
     opponent: Option<Box<dyn Player>>,
+    prev_sensors: ByColor<Bitboard>,
 }
 
 impl Default for GameSession {
@@ -35,30 +35,37 @@ impl Default for GameSession {
 impl GameSession {
     /// Create a session from the standard starting position with no opponent.
     pub fn new() -> Self {
+        let engine = GameEngine::new();
+        let prev_sensors = engine.expected_positions();
         Self {
-            engine: GameEngine::new(),
+            engine,
             opponent: None,
+            prev_sensors,
         }
     }
 
     /// Create a session from the standard starting position with an opponent.
     /// The human plays White; the opponent controls Black.
     pub fn with_opponent(opponent: Box<dyn Player>) -> Self {
+        let engine =
+            GameEngine::from_position_for_color(Chess::default(), Some(shakmaty::Color::White));
+        let prev_sensors = engine.expected_positions();
         Self {
-            engine: GameEngine::from_position_for_color(
-                Chess::default(),
-                Some(shakmaty::Color::White),
-            ),
+            engine,
             opponent: Some(opponent),
+            prev_sensors,
         }
     }
 
     /// Create a session from a specific position with an opponent.
     /// The human plays White; the opponent controls Black.
     pub fn from_position_with_opponent(position: Chess, opponent: Box<dyn Player>) -> Self {
+        let engine = GameEngine::from_position_for_color(position, Some(shakmaty::Color::White));
+        let prev_sensors = engine.expected_positions();
         Self {
-            engine: GameEngine::from_position_for_color(position, Some(shakmaty::Color::White)),
+            engine,
             opponent: Some(opponent),
+            prev_sensors,
         }
     }
 
@@ -73,12 +80,7 @@ impl GameSession {
         self.handle_human_move(&state);
         let computer_move = self.poll_opponent_move();
 
-        let feedback = compute_feedback(&state);
-        let mut feedback = if feedback.is_empty() {
-            recovery_feedback(&self.engine.expected_positions(), &positions).unwrap_or(feedback)
-        } else {
-            feedback
-        };
+        let mut feedback = compute_feedback(self.engine.position(), self.prev_sensors, positions);
 
         // Merge error status AFTER recovery fallback so recovery squares still appear
         if self
@@ -88,6 +90,8 @@ impl GameSession {
         {
             feedback = feedback.with_merged_status(StatusKind::Failure);
         }
+
+        self.prev_sensors = positions;
 
         TickResult {
             state,
@@ -135,7 +139,7 @@ impl GameSession {
 #[cfg(all(test, not(target_os = "espidf")))]
 mod tests {
     use super::*;
-    use crate::feedback::{FeedbackSource, SquareFeedback};
+    use crate::feedback::SquareFeedback;
     use crate::mock::ScriptedSensor;
     use crate::player::EmbeddedEngine;
     use shakmaty::{Color, Position, Square};

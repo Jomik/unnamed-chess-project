@@ -82,7 +82,7 @@ impl Player for EmbeddedEngine {
     }
 }
 
-#[cfg(all(test, not(target_os = "espidf")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use shakmaty::{CastlingMode, Square, fen::Fen};
