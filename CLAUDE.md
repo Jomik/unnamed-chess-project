@@ -21,8 +21,9 @@ just flash             # Flash to ESP32 and monitor serial
 ### Linting
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features --workspace --target $(rustc -vV | grep host | cut -d' ' -f2) -- -D warnings
+just fmt                # Format code
+just clippy             # Run clippy on host (warnings are errors)
+just check              # Run fmt + clippy + test
 ```
 
 CI treats clippy warnings as errors (`-D warnings`). ESP32 clippy uses `cargo +esp clippy`.
@@ -36,7 +37,7 @@ Two mutually exclusive code paths based on target:
 | ESP32-S3 firmware | `xtensa-esp32s3-espidf` (`target_os = "espidf"`) | `esp32::*` |
 | Host (dev/test) | host triple (e.g. `aarch64-apple-darwin`) | `mock::*` |
 
-Gate with `#[cfg(target_os = "espidf")]` / `#[cfg(not(target_os = "espidf"))]`. Never mix imports across the boundary. Tests use `#[cfg(all(test, not(target_os = "espidf")))]`.
+Gate with `#[cfg(target_os = "espidf")]` / `#[cfg(not(target_os = "espidf"))]`. Never mix imports across the boundary. Tests that import from `mock::*` use `#[cfg(all(test, not(target_os = "espidf")))]`; tests with no mock dependency use plain `#[cfg(test)]`.
 
 ## Architecture
 
@@ -44,40 +45,40 @@ Gate with `#[cfg(target_os = "espidf")]` / `#[cfg(not(target_os = "espidf"))]`. 
 
 ```
 PieceSensor::read_positions() → ByColor<Bitboard>
-    → GameEngine::tick(positions) → GameState
-        → compute_feedback(&state) → BoardFeedback
+    → GameSession::tick(sensors) → TickResult
+        → Player::poll_move() detects/computes move
+        → compute_feedback(position, prev_sensors, sensors) → BoardFeedback
             → BoardDisplay::show(&feedback)
 ```
 
-**GameSession** (`session.rs`) orchestrates the full per-tick sequence shared by both the hardware loop and terminal simulator: `engine.tick()` → opponent handling → feedback computation → recovery fallback.
+**GameSession** (`session.rs`) orchestrates the per-tick sequence shared by both the hardware loop and terminal simulator: poll active player → apply move → notify opponent → compute feedback.
 
-### Key Abstractions (traits in `lib.rs`)
+### Key Abstractions
 
-- **PieceSensor** — sensor input (ESP32 hardware / mock scripted)
-- **BoardDisplay** — visual output (ESP32 LEDs / terminal ANSI)
-- **Opponent** (`opponent.rs`) — computer move selection (EmbeddedEngine / Lichess)
-- **FeedbackSource** (`feedback.rs`) — decouples feedback computation from engine internals
+- **PieceSensor** (`lib.rs`) — sensor input (ESP32 hardware / mock scripted)
+- **BoardDisplay** (`lib.rs`) — visual output (ESP32 LEDs / terminal ANSI)
+- **Player** (`player/mod.rs`) — symmetric trait for both human and computer players
 
 ### Module Responsibilities
 
-- **game_logic.rs** — `GameEngine`: processes sensor bitboards, detects legal moves, advances chess position
-- **feedback.rs** — `BoardFeedback`: maps game state to per-square LED instructions (Origin, Destination, Capture, Check, Checker)
-- **session.rs** — `GameSession`: owns engine + opponent, produces `TickResult` per sensor frame
-- **opponent.rs** — `Opponent` trait + `EmbeddedEngine` (heuristic: captures > castling > promotions > random)
-- **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, threaded opponent
-- **recovery.rs** — highlights board divergence from expected position (guides player to fix misplaced pieces)
+- **player/mod.rs** — `Player` trait, `PlayerStatus` enum
+- **player/human.rs** — `HumanPlayer`: detects moves from sensor bitboards by matching against legal moves
+- **player/embedded.rs** — `EmbeddedEngine`: heuristic AI (captures > castling > promotions > random)
+- **feedback.rs** — `compute_feedback`: pure function mapping (position, prev_sensors, curr_sensors) → per-square LED instructions. Recovery guidance is integrated as a fallback path.
+- **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame
+- **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player`
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
 - **mock/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
 
-### Game Engine Constraints
+### Move Detection Constraints
 
 - Promotions are always to Queen (no piece-selection mechanism on hardware)
-- A move executes when pieces are placed, not just lifted (except en passant: 2 pieces lifted triggers processing)
-- Illegal physical states are silently ignored; the engine waits for a valid position
+- A move executes when pieces are placed, not just lifted
+- Illegal physical states are silently ignored; the player waits for a valid position
 
 ### BoardScript Format (for tests)
 
-Used by `ScriptedSensor` in `mock/script.rs` and extensively in `game_logic.rs` tests:
+Used by `ScriptedSensor` in `mock/script.rs` and extensively in `player/human.rs` tests:
 
 ```
 "e2 We4."      → lift e2, place white on e4, tick
@@ -98,4 +99,3 @@ WiFi credentials and Lichess config are compile-time `env!()` / `option_env!()` 
 - No `unwrap()` in production code; `expect()` only where failure is logically impossible
 - Prefer iterators over index-based loops, borrowing over cloning
 - All public types implement `Debug` at minimum
-- See `.github/instructions/rust.instructions.md` for full conventions

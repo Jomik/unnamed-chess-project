@@ -11,6 +11,20 @@ dev:
 test *args:
     cargo test --target {{host_target}} {{args}}
 
+# Format code
+fmt:
+    cargo fmt --all
+
+# Run clippy on host
+clippy:
+    cargo clippy --all-targets --all-features --workspace --target {{host_target}} -- -D warnings
+
+# Run all checks (fmt, clippy, test)
+check:
+    just fmt
+    just clippy
+    just test
+
 # Build for ESP32 (uses esp toolchain)
 build:
     cargo +esp build --release --target {{esp_target}}
