@@ -155,6 +155,7 @@ mod tests {
 
     #[test]
     fn detects_capture() {
+        // White pawn on e4, black pawn on d5 — white can capture
         let mut position =
             position_from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
         let mut sensor = ScriptedSensor::from_bitboards(
@@ -173,6 +174,7 @@ mod tests {
 
     #[test]
     fn detects_kingside_castle() {
+        // Italian Game — white can castle kingside
         let mut position = position_from_fen(
             "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 1",
         );
@@ -253,6 +255,7 @@ mod tests {
 
     #[test]
     fn detects_en_passant() {
+        // White pawn on e5, black just played d7-d5 — en passant available
         let mut position =
             position_from_fen("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
         let mut sensor = ScriptedSensor::from_bitboards(
@@ -271,6 +274,7 @@ mod tests {
 
     #[test]
     fn detects_promotion() {
+        // White pawn on b7 about to promote
         let mut position =
             position_from_fen("r1bqkbnr/pPpppppp/2n5/8/8/8/PP1PPPPP/RNBQKBNR w KQkq - 0 1");
         let mut sensor = ScriptedSensor::from_bitboards(

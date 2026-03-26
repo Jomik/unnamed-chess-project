@@ -1,7 +1,6 @@
 use shakmaty::{Bitboard, ByColor};
 
 pub mod feedback;
-pub mod game_logic;
 pub mod lichess;
 pub mod player;
 pub mod session;
@@ -10,7 +9,7 @@ pub mod setup;
 /// Trait for reading piece positions from the board.
 ///
 /// Abstracts over hardware sensors (ESP32) and mock/scripted inputs,
-/// providing a uniform interface for `GameEngine`.
+/// providing a uniform interface for the game session.
 pub trait PieceSensor {
     /// Error type for sensor read failures.
     type Error: std::fmt::Debug + std::fmt::Display;

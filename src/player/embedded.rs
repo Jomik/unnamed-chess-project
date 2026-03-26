@@ -114,6 +114,7 @@ mod tests {
 
     #[test]
     fn prefers_capturing_higher_value_piece() {
+        // Black knight on c4 can capture queen on d2 or pawn on e3
         let pos = position_from_fen("8/8/8/8/2n5/4P3/3Q4/4K1k1 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.opponent_moved(&pos, &dummy_move());
@@ -126,6 +127,7 @@ mod tests {
 
     #[test]
     fn picks_non_capture_when_no_captures_available() {
+        // After 1. e4 — black has no captures available
         let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.opponent_moved(&pos, &dummy_move());
@@ -137,6 +139,7 @@ mod tests {
 
     #[test]
     fn prefers_castling_over_regular_moves() {
+        // Black can castle both sides
         let pos = position_from_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.opponent_moved(&pos, &dummy_move());
@@ -148,6 +151,7 @@ mod tests {
 
     #[test]
     fn promotes_to_queen() {
+        // Black pawn on d2 about to promote
         let pos = position_from_fen("8/8/8/8/8/k7/3p4/K7 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.opponent_moved(&pos, &dummy_move());
@@ -159,6 +163,7 @@ mod tests {
 
     #[test]
     fn avoids_king_moves_when_other_pieces_can_move() {
+        // Black king on g8, knight on f6 — should prefer knight moves
         let pos = position_from_fen("6k1/8/5n2/8/8/8/8/4K3 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         for _ in 0..20 {
@@ -172,6 +177,7 @@ mod tests {
 
     #[test]
     fn moves_king_when_only_king_can_move() {
+        // Lone black king — only king moves are legal
         let pos = position_from_fen("8/8/8/8/8/8/8/k3K3 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         engine.opponent_moved(&pos, &dummy_move());

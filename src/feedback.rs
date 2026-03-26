@@ -501,6 +501,7 @@ mod tests {
 
     #[test]
     fn distinguish_captures_from_destinations() {
+        // White pawn on e4 can move to e5 (destination) or capture on d5 (capture)
         let position =
             position_from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1");
         let prev = sensors_from_position(&position);
@@ -518,6 +519,7 @@ mod tests {
 
     #[test]
     fn captured_piece_shows_origins() {
+        // e4 pawn and c3 knight can both capture on d5
         let position =
             position_from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/2N5/PPPP1PPP/R1BQKBNR w KQkq - 0 1");
         let prev = sensors_from_position(&position);
@@ -533,6 +535,7 @@ mod tests {
 
     #[test]
     fn both_lifted_and_captured_shows_completion() {
+        // White pawn on e4, black pawn on d5 — capture in progress
         let position =
             position_from_fen("rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1");
         let prev = sensors_from_position(&position);
@@ -550,6 +553,7 @@ mod tests {
 
     #[test]
     fn en_passant_capture_feedback() {
+        // White pawn on e5, black just played d7-d5 — en passant available
         let position =
             position_from_fen("rnbqkbnr/1pp1pppp/p7/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 1");
         let prev = sensors_from_position(&position);
@@ -566,6 +570,7 @@ mod tests {
 
     #[test]
     fn check_feedback_shown_when_idle() {
+        // Black king in check from white queen on h5
         let position =
             position_from_fen("rnbqkbnr/pppp2pp/8/4pp1Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1");
         let sensors = sensors_from_position(&position);
@@ -578,6 +583,7 @@ mod tests {
 
     #[test]
     fn check_feedback_not_shown_when_piece_lifted() {
+        // Black king in check, lifting g8 knight to block
         let position =
             position_from_fen("rnbqkbnr/pppp2pp/8/4pp1Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1");
         let prev = sensors_from_position(&position);
@@ -623,6 +629,7 @@ mod tests {
 
     #[test]
     fn double_check_feedback() {
+        // Black king attacked by both rook on e1 and bishop on h5
         let position = position_from_fen("4k3/8/8/7B/8/8/8/4R2K b - - 0 1");
         let sensors = sensors_from_position(&position);
 
@@ -637,6 +644,7 @@ mod tests {
 
     #[test]
     fn checkmate_feedback() {
+        // Scholar's mate — Qxf7# checkmates the black king
         let position =
             position_from_fen("rnbqkb1r/pppp1Qpp/5n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4");
         let sensors = sensors_from_position(&position);
@@ -651,6 +659,7 @@ mod tests {
 
     #[test]
     fn stalemate_feedback() {
+        // Kc6 + Qb6 vs Ka8 — black has no legal moves, not in check
         let position = position_from_fen("k7/8/1QK5/8/8/8/8/8 b - - 0 1");
         let sensors = sensors_from_position(&position);
 
@@ -696,6 +705,7 @@ mod tests {
 
     #[test]
     fn mid_castle_shows_rook_guidance() {
+        // White can castle kingside — king placed on g1 but rook still on h1
         let position =
             position_from_fen("rnbqkbnr/pppppppp/8/8/8/5NP1/PPPPPPBP/RNBQK2R w KQkq - 0 1");
         let prev = sensors_from_position(&position);
