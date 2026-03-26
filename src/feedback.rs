@@ -126,20 +126,27 @@ pub enum GameOutcome {
 ///
 /// Pure function — derives lifted piece, captured piece, check, outcome,
 /// recovery, and castle guidance entirely from the inputs.
+///
+/// `reference_sensors` is the last known good board state (used to suppress guidance
+/// for pieces that were never physically present in this interaction cycle).
+///
+/// Delegates to `compute_state_feedback` for recovery and unresolved multi-piece scenarios.
 pub fn compute_feedback(
     position: &Chess,
-    prev_sensors: ByColor<Bitboard>,
     curr_sensors: ByColor<Bitboard>,
+    reference_sensors: ByColor<Bitboard>,
 ) -> BoardFeedback {
     let curr_combined = curr_sensors.white | curr_sensors.black;
-    let prev_combined = prev_sensors.white | prev_sensors.black;
 
     let turn = position.turn();
     let expected_board = position.board();
 
-    // Derive lifted and captured from sensor diff
-    let lifted = expected_board.by_color(turn) & !curr_combined & prev_combined;
-    let captured = expected_board.by_color(turn.other()) & !curr_combined & prev_combined;
+    // Derive lifted and captured from expected board vs current sensors,
+    // filtered by reference (only pieces physically present as the correct color can be
+    // lifted/captured — prevents wrong-color reference pieces from triggering capture guidance)
+    let lifted = expected_board.by_color(turn) & !curr_combined & reference_sensors[turn];
+    let captured =
+        expected_board.by_color(turn.other()) & !curr_combined & reference_sensors[turn.other()];
 
     // In-recovery suppression: check for divergence beyond lifted/captured
     let occupancy_diff = (expected_board.occupied() ^ curr_combined) & !lifted & !captured;
@@ -173,16 +180,58 @@ pub fn compute_feedback(
 
     match (captured_sq, lifted_sq) {
         (None, Some(from)) => show_destinations_for(&legal_moves, from),
-        (Some(to), None) => show_capture_options(&legal_moves, to),
+        (Some(to), None) => {
+            let fb = show_capture_options(&legal_moves, to);
+            if fb.is_empty() {
+                let mut fb = BoardFeedback::new();
+                fb.set(to, SquareFeedback::Destination);
+                fb
+            } else {
+                fb
+            }
+        }
         (Some(to), Some(from)) => show_capture_completion(&legal_moves, from, to),
         (None, None) => {
-            if !position.checkers().is_empty() {
+            if !lifted.is_empty() || !captured.is_empty() {
+                // Multiple pieces lifted/captured but couldn't resolve to a single move —
+                // fall back to state feedback (shows recovery for unresolved pieces)
+                compute_state_feedback(position, curr_sensors)
+            } else if !position.checkers().is_empty() {
                 show_check_feedback(position)
             } else {
                 BoardFeedback::default()
             }
         }
     }
+}
+
+/// Compute position-state feedback — outcomes, recovery, and check indicators.
+///
+/// Used directly for non-interactive player turns, and as a fallback from
+/// `compute_feedback` when the board diverges from expected position.
+pub fn compute_state_feedback(position: &Chess, curr_sensors: ByColor<Bitboard>) -> BoardFeedback {
+    let legal_moves = position.legal_moves();
+
+    if let Some(outcome) = compute_outcome(position, &legal_moves) {
+        return show_outcome_feedback(outcome);
+    }
+
+    let curr_combined = curr_sensors.white | curr_sensors.black;
+    let expected_board = position.board();
+    let occupancy_diff = expected_board.occupied() ^ curr_combined;
+    let wrong_color = (expected_board.by_color(Color::White) & curr_sensors.black)
+        | (expected_board.by_color(Color::Black) & curr_sensors.white);
+
+    if !occupancy_diff.is_empty() || !wrong_color.is_empty() {
+        return recovery_feedback(expected_board, &curr_sensors);
+    }
+
+    // Board matches expected — show check feedback if applicable
+    if !position.checkers().is_empty() {
+        return show_check_feedback(position);
+    }
+
+    BoardFeedback::default()
 }
 
 fn compute_outcome(position: &Chess, legal_moves: &MoveList) -> Option<GameOutcome> {
@@ -469,7 +518,7 @@ mod tests {
         let mut curr = prev;
         curr.white.toggle(Square::E2);
 
-        let fb = compute_feedback(&position, prev, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::E2), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::E3), Some(SquareFeedback::Destination));
@@ -485,7 +534,7 @@ mod tests {
         let mut curr = prev;
         curr.white.toggle(Square::E4); // lift e4
 
-        let fb = compute_feedback(&position, prev, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::E5), Some(SquareFeedback::Destination));
@@ -503,11 +552,29 @@ mod tests {
         let mut curr = prev;
         curr.black.toggle(Square::D5); // remove opponent pawn
 
-        let fb = compute_feedback(&position, prev, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::D5), Some(SquareFeedback::Destination));
         assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::C3), Some(SquareFeedback::Origin));
+    }
+
+    #[test]
+    fn uncapturable_opponent_piece_shows_recovery() {
+        // Starting position: no white piece can capture the a8 rook
+        let position = Chess::default();
+        let reference = sensors_from_position(&position);
+        let mut curr = reference;
+        curr.black.toggle(Square::A8); // lift opponent rook — no white piece can capture there
+
+        let fb = compute_feedback(&position, curr, reference);
+
+        // Should show "place it back" guidance
+        assert_eq!(
+            fb.get(Square::A8),
+            Some(SquareFeedback::Destination),
+            "uncapturable opponent piece should show Destination (place back)"
+        );
     }
 
     #[test]
@@ -520,7 +587,7 @@ mod tests {
         curr.white.toggle(Square::E4); // lift our pawn
         curr.black.toggle(Square::D5); // remove opponent pawn
 
-        let fb = compute_feedback(&position, prev, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::E4), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::D5), Some(SquareFeedback::Destination));
@@ -537,7 +604,7 @@ mod tests {
         let mut curr = prev;
         curr.black.toggle(Square::D5); // remove en passant pawn
 
-        let fb = compute_feedback(&position, prev, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::E5), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::D6), Some(SquareFeedback::Destination));
@@ -567,7 +634,7 @@ mod tests {
         let mut curr = prev;
         curr.black.toggle(Square::G8); // lift knight
 
-        let fb = compute_feedback(&position, prev, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::G8), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::E8), None);
@@ -580,17 +647,18 @@ mod tests {
         let position =
             position_from_fen("rnbqkbnr/pppp2pp/8/4pp1Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1");
         let sensors = sensors_from_position(&position);
-        // Create divergence: remove a piece that shouldn't be missing (extra recovery diff)
+        // Create divergence: add an extra piece on an empty square to trigger recovery mode.
+        // An extra piece that doesn't belong anywhere creates occupancy_diff > 0.
         let mut diverged = sensors;
-        diverged.white.toggle(Square::A1); // rook missing — triggers recovery
+        diverged.black.toggle(Square::A4); // phantom piece on empty square — triggers recovery
 
         let fb = compute_feedback(&position, diverged, diverged);
 
-        // Should show recovery (missing rook), NOT check feedback
+        // Should show recovery (extra piece), NOT check feedback
         assert_eq!(
-            fb.get(Square::A1),
-            Some(SquareFeedback::Destination),
-            "missing rook should show Destination"
+            fb.get(Square::A4),
+            Some(SquareFeedback::Capture),
+            "extra piece should show Capture"
         );
         assert_eq!(
             fb.get(Square::E8),
@@ -681,6 +749,90 @@ mod tests {
     // --- Castle guidance ---
 
     #[test]
+    fn no_capture_guidance_when_wrong_color_in_reference() {
+        // After computer plays Nxd5 (capturing white pawn), expected has black knight on d5.
+        // Physical board still has white pawn on d5 (human hasn't cleared it yet).
+        // Reference (last matching state) has white pawn on d5 — the pre-capture state.
+        // Human lifts white pawn from d5 — should NOT show capture options for d5.
+
+        // Position: black knight expected on d5 (after Nxd5 capture, it is now white's turn)
+        let position =
+            position_from_fen("rnbqkb1r/pppppppp/8/3n4/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1");
+
+        // Reference: white pawn was on d5, black knight was NOT on d5
+        let mut reference = sensors_from_position(&position);
+        reference.black.toggle(Square::D5); // remove black knight from reference
+        reference.white.toggle(Square::D5); // add white pawn to reference (pre-capture state)
+
+        // Current sensors: human lifted the white pawn from d5 (white pawn no longer present)
+        let mut curr = reference;
+        curr.white.toggle(Square::D5); // white pawn removed
+
+        let fb = compute_feedback(&position, curr, reference);
+
+        // d5 has a missing expected black piece, but reference only had a WHITE piece there.
+        // Should NOT show capture options (Origin squares). Should show recovery instead.
+        for (sq, feedback) in fb.squares() {
+            assert_ne!(
+                feedback,
+                SquareFeedback::Origin,
+                "should not show capture Origin on {sq:?} — wrong color was in reference"
+            );
+        }
+    }
+
+    // --- compute_state_feedback (state feedback for non-interactive turns) ---
+
+    #[test]
+    fn state_feedback_shows_check() {
+        // Black king in check from white queen on h5
+        let position =
+            position_from_fen("rnbqkbnr/pppp2pp/8/4pp1Q/4P3/8/PPPP1PPP/RNB1KBNR b KQkq - 0 1");
+        let sensors = sensors_from_position(&position);
+
+        // compute_state_feedback is called for non-interactive turns (e.g. computer's turn)
+        let fb = compute_state_feedback(&position, sensors);
+
+        // Should show check feedback in the state feedback path
+        assert_eq!(
+            fb.get(Square::E8),
+            Some(SquareFeedback::Check),
+            "king in check should show Check feedback in state/recovery path"
+        );
+        assert_eq!(
+            fb.get(Square::H5),
+            Some(SquareFeedback::Checker),
+            "checking piece should show Checker feedback in state/recovery path"
+        );
+    }
+
+    // --- Two pieces lifted ---
+
+    #[test]
+    fn two_pieces_lifted_shows_recovery() {
+        // Starting position, white lifts both e2 and d2 pawns
+        let position = Chess::default();
+        let reference = sensors_from_position(&position);
+        let mut curr = reference;
+        curr.white.toggle(Square::E2);
+        curr.white.toggle(Square::D2);
+
+        let fb = compute_feedback(&position, curr, reference);
+
+        // Should show recovery: place pieces back
+        assert_eq!(
+            fb.get(Square::E2),
+            Some(SquareFeedback::Destination),
+            "lifted piece e2 should show Destination (place back)"
+        );
+        assert_eq!(
+            fb.get(Square::D2),
+            Some(SquareFeedback::Destination),
+            "lifted piece d2 should show Destination (place back)"
+        );
+    }
+
+    #[test]
     fn mid_castle_shows_rook_guidance() {
         // White can castle kingside — king placed on g1 but rook still on h1
         let position =
@@ -691,7 +843,7 @@ mod tests {
         curr.white.toggle(Square::E1); // king left e1
         curr.white.toggle(Square::G1); // king placed on g1
 
-        let fb = compute_feedback(&position, prev, curr);
+        let fb = compute_feedback(&position, curr, sensors_from_position(&position));
 
         assert_eq!(fb.get(Square::H1), Some(SquareFeedback::Origin));
         assert_eq!(fb.get(Square::F1), Some(SquareFeedback::Destination));
