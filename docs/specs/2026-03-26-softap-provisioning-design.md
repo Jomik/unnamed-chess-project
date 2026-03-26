@@ -215,15 +215,23 @@ Keep:
 
 | File                            | Purpose                                                  |
 |---------------------------------|----------------------------------------------------------|
-| `src/esp32/provisioning.rs`     | `BoardConfig`, NVS load/save, SoftAP + HTTP server      |
+| `src/provisioning.rs`           | `BoardConfig` struct, `ValidationError`, `validate()` — platform-independent, host-testable |
+| `src/esp32/provisioning.rs`     | `BoardConfig` NVS `load`/`save` impl, `ProvisioningError`, SoftAP + HTTP server |
 | `src/esp32/provisioning.html`   | Single-page config form (embedded via `include_str!`)    |
 
+`BoardConfig` and validation live outside `esp32/` so they compile on the host target and can be unit-tested via `just test`. The ESP-IDF-specific methods (`load`, `save`) are added via a `cfg`-gated `impl BoardConfig` block in `src/esp32/provisioning.rs`.
+
 ### Module Registration
+
+`src/lib.rs` gains:
+```rust
+pub mod provisioning;
+```
 
 `src/esp32/mod.rs` gains:
 ```rust
 pub mod provisioning;
-pub use provisioning::BoardConfig;
+pub use provisioning::ProvisioningError;
 ```
 
 ## Testing Strategy
