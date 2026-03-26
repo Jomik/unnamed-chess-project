@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-use embedded_svc::io::Read;
 use embedded_svc::io::Write;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::http::server::{Configuration as HttpConfig, EspHttpServer};
@@ -169,7 +168,7 @@ pub fn run_provisioning_server(
     server
         .fn_handler("/", embedded_svc::http::Method::Get, |req| {
             req.into_ok_response()?.write_all(FORM_HTML.as_bytes())?;
-            Ok(())
+            Ok::<(), Box<dyn std::error::Error>>(())
         })
         .expect("failed to register GET handler");
 
@@ -222,7 +221,7 @@ pub fn run_provisioning_server(
                         req.into_ok_response()?.write_all(error_html.as_bytes())?;
                     }
                 }
-                Ok(())
+                Ok::<(), Box<dyn std::error::Error>>(())
             },
         )
         .expect("failed to register POST handler");

@@ -37,6 +37,10 @@ flash-diag:
 monitor:
     cargo +esp espflash monitor
 
+# Erase NVS partition to force re-provisioning on next boot
+erase-nvs:
+    cargo +esp espflash erase-parts --partition-table partitions.csv nvs
+
 # Install ESP Xtensa toolchain (run once after installing rustup)
 setup-esp:
     espup install
