@@ -123,7 +123,7 @@ fn main() {
                         .unwrap(),
                 };
 
-                let client = Esp32LichessClient::new(token);
+                let client = Esp32LichessClient::new(token.to_string());
 
                 let spawn_fn = |f: Box<dyn FnOnce() + Send>| -> Result<(), String> {
                     std::thread::Builder::new()
