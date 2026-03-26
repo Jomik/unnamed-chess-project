@@ -11,7 +11,7 @@ use crate::player::{Player, PlayerStatus};
 /// (60s in esp32/lichess.rs) to avoid false failures on slow networks.
 const WORKER_STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// Configuration for Lichess integration, constructed from compile-time env vars.
+/// Configuration for Lichess integration.
 /// The token is not included here — it is passed directly to the LichessClient
 /// constructor, keeping the secret out of a general config struct.
 pub struct LichessConfig {
