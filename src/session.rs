@@ -20,7 +20,6 @@ pub struct GameSession {
     position: Chess,
     white: Box<dyn Player>,
     black: Box<dyn Player>,
-    prev_sensors: ByColor<Bitboard>,
     illegal_move: bool,
 }
 
@@ -32,16 +31,10 @@ impl GameSession {
 
     /// Create a session from a specific position.
     pub fn from_position(position: Chess, white: Box<dyn Player>, black: Box<dyn Player>) -> Self {
-        let board = position.board();
-        let prev_sensors = ByColor {
-            white: board.by_color(Color::White),
-            black: board.by_color(Color::Black),
-        };
         Self {
             position,
             white,
             black,
-            prev_sensors,
             illegal_move: false,
         }
     }
@@ -72,7 +65,7 @@ impl GameSession {
             }
         }
 
-        let mut feedback = compute_feedback(&self.position, self.prev_sensors, sensors);
+        let mut feedback = compute_feedback(&self.position, sensors);
 
         if self.illegal_move
             || self.white.status() == PlayerStatus::Error
@@ -80,8 +73,6 @@ impl GameSession {
         {
             feedback = feedback.with_merged_status(StatusKind::Failure);
         }
-
-        self.prev_sensors = sensors;
 
         TickResult {
             feedback,
@@ -239,6 +230,50 @@ mod tests {
 
         assert!(result.feedback.get(Square::E3).is_some());
         assert!(result.feedback.get(Square::E4).is_some());
+    }
+
+    #[test]
+    fn lifted_piece_guidance_persists_across_ticks() {
+        use crate::feedback::SquareFeedback;
+
+        let (mut sensor, mut session) = human_vs_human();
+
+        // Tick 1: lift e2 pawn
+        sensor.push_script("e2.").unwrap();
+        let result = run_script(&mut sensor, &mut session);
+        assert_eq!(
+            result.feedback.get(Square::E2),
+            Some(SquareFeedback::Origin),
+            "tick 1: lifted square should be Origin"
+        );
+        assert_eq!(
+            result.feedback.get(Square::E3),
+            Some(SquareFeedback::Destination),
+            "tick 1: legal destination should show"
+        );
+        assert_eq!(
+            result.feedback.get(Square::E4),
+            Some(SquareFeedback::Destination),
+            "tick 1: legal destination e4 should show"
+        );
+
+        // Tick 2: same sensors (piece still held) — guidance must persist
+        let result = session.tick(sensor.read_positions());
+        assert_eq!(
+            result.feedback.get(Square::E2),
+            Some(SquareFeedback::Origin),
+            "tick 2: lifted square should still be Origin, not recovery"
+        );
+        assert_eq!(
+            result.feedback.get(Square::E3),
+            Some(SquareFeedback::Destination),
+            "tick 2: legal destination should still show"
+        );
+        assert_eq!(
+            result.feedback.get(Square::E4),
+            Some(SquareFeedback::Destination),
+            "tick 2: legal destination e4 should still show"
+        );
     }
 
     #[test]
