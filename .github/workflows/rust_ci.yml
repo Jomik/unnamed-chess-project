@@ -7,10 +7,12 @@ on:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "justfile"
   pull_request:
     paths-ignore:
       - "**/*.md"
       - "docs/**"
+      - "justfile"
   workflow_dispatch:
 
 env:
