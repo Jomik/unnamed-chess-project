@@ -115,6 +115,49 @@ fn parse_form_body(body: &str) -> BoardConfig {
     }
 }
 
+fn render_error(msg: &str) -> String {
+    FORM_HTML.replace(
+        "<!-- ERRORS -->",
+        &format!("<div class=\"error\">{msg}</div>"),
+    )
+}
+
+const SUCCESS_HTML: &str =
+    "<!DOCTYPE html><html><body><h1>Saved!</h1><p>Board is rebooting...</p></body></html>";
+
+/// Handle POST form submission. Reads body, validates, saves to NVS.
+/// Returns (response_html, should_reboot).
+fn handle_post(
+    req: &mut impl embedded_svc::io::Read,
+    nvs: &Mutex<EspNvs<NvsDefault>>,
+    reboot_flag: &Mutex<bool>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut body_buf = [0u8; 1024];
+    let mut total = 0;
+    loop {
+        let n = req.read(&mut body_buf[total..]).unwrap_or(0);
+        if n == 0 {
+            break;
+        }
+        total += n;
+    }
+    let body = core::str::from_utf8(&body_buf[..total]).unwrap_or("");
+
+    let config = parse_form_body(body);
+
+    if let Err(e) = config.validate() {
+        return Err(e.into());
+    }
+
+    let nvs = nvs.lock().expect("NVS mutex should not be poisoned");
+    config.save(&nvs)?;
+
+    *reboot_flag
+        .lock()
+        .expect("reboot mutex should not be poisoned") = true;
+    Ok(())
+}
+
 /// Start WiFi in SoftAP mode. Returns the EspWifi handle (must be kept alive).
 fn start_softap(
     modem: impl esp_idf_svc::hal::modem::WifiModemPeripheral + 'static,
@@ -176,57 +219,17 @@ pub fn run_provisioning_server(
     let nvs_clone = nvs.clone();
     let reboot_clone = reboot_flag.clone();
     server
-        .fn_handler(
-            "/",
-            embedded_svc::http::Method::Post,
-            move |mut req| {
-                // Read POST body (loop to handle partial reads)
-                let mut body_buf = [0u8; 1024];
-                let mut total = 0;
-                loop {
-                    let n = req.read(&mut body_buf[total..]).unwrap_or(0);
-                    if n == 0 {
-                        break;
-                    }
-                    total += n;
-                }
-                let body = core::str::from_utf8(&body_buf[..total]).unwrap_or("");
-
-                let config = parse_form_body(body);
-
-                match config.validate() {
-                    Ok(()) => {
-                        let nvs = nvs_clone
-                            .lock()
-                            .expect("NVS mutex should not be poisoned");
-                        if let Err(e) = config.save(&nvs) {
-                            let error_html = FORM_HTML.replace(
-                                "<!-- ERRORS -->",
-                                &format!("<div class=\"error\">Save failed: {e}</div>"),
-                            );
-                            req.into_ok_response()?.write_all(error_html.as_bytes())?;
-                        } else {
-                            let success = "<!DOCTYPE html><html><body><h1>Saved!</h1><p>Board is rebooting...</p></body></html>";
-                            req.into_ok_response()?.write_all(success.as_bytes())?;
-                            *reboot_clone
-                                .lock()
-                                .expect("reboot mutex should not be poisoned") = true;
-                        }
-                    }
-                    Err(e) => {
-                        let error_html = FORM_HTML.replace(
-                            "<!-- ERRORS -->",
-                            &format!("<div class=\"error\">{e}</div>"),
-                        );
-                        req.into_ok_response()?.write_all(error_html.as_bytes())?;
-                    }
-                }
-                Ok::<(), Box<dyn std::error::Error>>(())
-            },
-        )
+        .fn_handler("/", embedded_svc::http::Method::Post, move |mut req| {
+            let response = match handle_post(&mut req, &nvs_clone, &reboot_clone) {
+                Ok(()) => SUCCESS_HTML.to_string(),
+                Err(e) => render_error(&e.to_string()),
+            };
+            req.into_ok_response()?.write_all(response.as_bytes())?;
+            Ok::<(), Box<dyn std::error::Error>>(())
+        })
         .expect("failed to register POST handler");
 
-    log::info!("Provisioning server running at http://192.168.4.1/");
+    log::info!("Provisioning server running at http://192.168.71.1/");
 
     // Block until reboot flag is set
     loop {

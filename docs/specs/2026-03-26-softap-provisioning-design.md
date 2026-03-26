@@ -77,7 +77,7 @@ init peripherals + NVS partition
 
 1. LEDs show `status_pending` pattern (pulsing blue) to indicate awaiting setup.
 2. Start SoftAP with SSID `"ChessBoard"` (open network, no password) — consumes `peripherals.modem`.
-3. Start HTTP server on `192.168.4.1:80`.
+3. Start HTTP server on `192.168.71.1:80`.
 4. Serve config form on `GET /`, accept submission on `POST /`.
 5. On valid submission: save to NVS, show `status_success` LED flash, respond with success page, reboot after short delay via `esp_restart()`.
 6. On validation error: re-render form with inline error messages.
@@ -106,8 +106,8 @@ Clock limit (10800) and clock increment (180) remain hardcoded defaults — they
 ### SoftAP Configuration
 
 - SSID: `"ChessBoard"` (open, no password)
-- Default gateway/IP: `192.168.4.1`
-- No DNS redirect — user manually navigates to `192.168.4.1`. Note: some devices (iOS, Android) probe known URLs for internet connectivity and may show a "no internet" warning when connected to the SoftAP. This is cosmetic — the form is still accessible at `192.168.4.1`. A DNS redirect (captive portal) can be added as a future enhancement if this proves confusing.
+- Default gateway/IP: `192.168.71.1`
+- No DNS redirect — user manually navigates to `192.168.71.1`. Note: some devices (iOS, Android) probe known URLs for internet connectivity and may show a "no internet" warning when connected to the SoftAP. This is cosmetic — the form is still accessible at `192.168.71.1`. A DNS redirect (captive portal) can be added as a future enhancement if this proves confusing.
 
 ### HTTP Endpoints
 
