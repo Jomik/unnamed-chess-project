@@ -46,7 +46,7 @@ Gate hardware-specific code with `#[cfg(target_os = "espidf")]`. Never mix impor
 PieceSensor::read_positions() → ByColor<Bitboard>
     → GameSession::tick(sensors) → TickResult
         → Player::poll_move() detects/computes move
-        → compute_feedback(position, prev_sensors, sensors) → BoardFeedback
+        → compute_feedback(position, sensors, reference_sensors) → BoardFeedback
             → BoardDisplay::show(&feedback)
 ```
 
@@ -60,10 +60,10 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 
 ### Module Responsibilities
 
-- **player/mod.rs** — `Player` trait, `PlayerStatus` enum
+- **player/mod.rs** — `Player` trait (`poll_move`, `opponent_moved`, `is_interactive`), `PlayerStatus` enum
 - **player/human.rs** — `HumanPlayer`: detects moves from sensor bitboards by matching against legal moves
 - **player/embedded.rs** — `EmbeddedEngine`: heuristic AI (captures > castling > promotions > random)
-- **feedback.rs** — `compute_feedback`: pure function mapping (position, prev_sensors, curr_sensors) → per-square LED instructions. Recovery guidance is integrated as a fallback path.
+- **feedback.rs** — `compute_feedback` and `compute_state_feedback`: feedback from position + sensors. Recovery guidance is integrated as a fallback path.
 - **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame
 - **provisioning.rs** — `BoardConfig` struct, `ValidationError`, validation logic (platform-independent, host-testable)
 - **esp32/provisioning.rs** — NVS `load`/`save` for `BoardConfig`, SoftAP + HTTP provisioning server

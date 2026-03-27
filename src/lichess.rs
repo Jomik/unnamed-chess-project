@@ -146,6 +146,10 @@ pub struct LichessOpponent {
 }
 
 impl Player for LichessOpponent {
+    fn is_interactive(&self) -> bool {
+        false
+    }
+
     fn opponent_moved(&mut self, _position: &Chess, opponent_move: &Move) {
         if self.error || self.game_over {
             return;

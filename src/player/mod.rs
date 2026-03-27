@@ -36,4 +36,12 @@ pub trait Player {
     fn status(&self) -> PlayerStatus {
         PlayerStatus::Active
     }
+
+    /// Whether this player interacts physically with the board.
+    ///
+    /// Interactive players (humans) trigger move guidance when lifting pieces.
+    /// Non-interactive players (engines, Lichess) suppress guidance during their turn.
+    fn is_interactive(&self) -> bool {
+        true
+    }
 }
