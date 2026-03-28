@@ -13,8 +13,10 @@ The default Cargo target is `xtensa-esp32s3-espidf` (set in `.cargo/config.toml`
 ```bash
 just test              # Run all host tests
 just test -- test_name # Run a single test by name
-just build             # Build ESP32 firmware (requires `cargo +esp`)
+just build             # Build ESP32 firmware
+just build-diag        # Build diagnostics binary
 just flash             # Flash to ESP32 and monitor serial
+just flash-diag        # Flash diagnostics binary and monitor serial
 ```
 
 ### Linting
@@ -22,10 +24,12 @@ just flash             # Flash to ESP32 and monitor serial
 ```bash
 just fmt                # Format code
 just clippy             # Run clippy on host (warnings are errors)
-just check              # Run fmt + clippy + test
+just clippy-esp         # Run clippy for ESP32 target
+just check              # Run fmt + clippy + test (host only)
+just check-all          # Run check + clippy-esp
 ```
 
-CI treats clippy warnings as errors (`-D warnings`). ESP32 clippy uses `cargo +esp clippy`.
+CI treats clippy warnings as errors (`-D warnings`). **Never run `cargo +esp` directly** — always use `just` recipes, which load `IDF_PATH` from `.env` via `set dotenv-load`. Running `cargo +esp` without `IDF_PATH` corrupts the ESP-IDF setup.
 
 ## Conditional Compilation
 
@@ -66,7 +70,8 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **feedback.rs** — `compute_feedback` and `compute_state_feedback`: feedback from position + sensors. Recovery guidance is integrated as a fallback path.
 - **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame
 - **provisioning.rs** — `BoardConfig` struct, `ValidationError`, validation logic (platform-independent, host-testable)
-- **esp32/provisioning.rs** — NVS `load`/`save` for `BoardConfig`, SoftAP + HTTP provisioning server
+- **esp32/sensor.rs** — `Esp32PieceSensor`: ADC + mux scanning, `RawScan` for raw millivolt readings, `read_raw()` primitive
+- **esp32/provisioning.rs** — NVS `load`/`save` for `BoardConfig` and `SensorCalibration`, SoftAP + HTTP provisioning server
 - **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player`
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
 - **testutil/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
@@ -97,6 +102,16 @@ Runtime configuration (WiFi credentials, Lichess settings) is stored in the ESP3
 The `IDF_PATH` build variable can still be set in `.env` (loaded via the justfile's `set dotenv-load`).
 
 See `docs/specs/2026-03-26-softap-provisioning-design.md` for the full design.
+
+## Sensor Calibration
+
+Per-board sensor calibration (baseline voltage, detection threshold) is stored in NVS. The diagnostics binary (`src/bin/diagnostics.rs`, flashed via `just flash-diag`) runs a 3-phase pipeline: assembly check (LED sweep → empty board scan → starting position scan), calibration (derives threshold from measured noise floor and weakest piece signal), and change-based diagnosis (logs sensor changes to identify noisy squares).
+
+The production firmware loads calibration from NVS on boot, falling back to `SensorConfig::default()` if uncalibrated.
+
+Calibration data lives in a separate `cal` NVS partition from the main `nvs` partition. This means `just erase-nvs` (for WiFi reprovisioning) does not wipe calibration. Use `just erase-cal` to force recalibration.
+
+See `docs/specs/2026-03-28-sensor-diagnostics-design.md` for the full design.
 
 ## Coding Conventions
 
