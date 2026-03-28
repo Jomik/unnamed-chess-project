@@ -21,9 +21,22 @@ check:
     just clippy
     just test
 
+# Run clippy for ESP32 (uses esp toolchain)
+clippy-esp:
+    cargo +esp clippy --target {{esp_target}} -- -D warnings
+
+# Run all checks including ESP32 clippy (fmt, clippy, test, clippy-esp)
+check-all:
+    just check
+    just clippy-esp
+
 # Build for ESP32 (uses esp toolchain)
 build:
     cargo +esp build --release --target {{esp_target}}
+
+# Build diagnostics binary for ESP32 (uses esp toolchain)
+build-diag:
+    cargo +esp build --release --target {{esp_target}} --bin diagnostics
 
 # Flash to ESP32 and monitor serial output
 flash:
@@ -40,6 +53,10 @@ monitor:
 # Erase NVS partition to force re-provisioning on next boot
 erase-nvs:
     cargo +esp espflash erase-parts --partition-table partitions.csv nvs
+
+# Erase calibration partition to force recalibration on next diagnostics run
+erase-cal:
+    cargo +esp espflash erase-parts --partition-table partitions.csv cal
 
 # Install ESP Xtensa toolchain (run once after installing rustup)
 setup-esp:

@@ -4,8 +4,10 @@ fn main() {
     use esp_idf_svc::hal::adc::oneshot::AdcDriver;
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
-    use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvs, NvsDefault};
-    use unnamed_chess_project::esp32::config::{LedPalette, SensorConfig};
+    use esp_idf_svc::nvs::{
+        EspDefaultNvsPartition, EspNvs, EspNvsPartition, NvsCustom, NvsDefault,
+    };
+    use unnamed_chess_project::esp32::config::{LedPalette, SensorCalibration, SensorConfig};
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, WifiConnection};
     use unnamed_chess_project::feedback::{BoardFeedback, StatusKind};
     use unnamed_chess_project::player::EmbeddedEngine;
@@ -49,6 +51,32 @@ fn main() {
                 nvs_partition,
                 nvs,
             );
+        }
+    };
+
+    // Load sensor calibration from the dedicated cal partition (survives erase-nvs)
+    let cal_partition =
+        EspNvsPartition::<NvsCustom>::take("cal").expect("failed to take cal NVS partition");
+    let sensor_config = match SensorCalibration::load(&cal_partition) {
+        Ok(Some(cal)) => {
+            log::info!(
+                "Using NVS calibration: baseline={}mV, threshold={}mV",
+                cal.baseline_mv,
+                cal.threshold_mv
+            );
+            SensorConfig {
+                baseline_mv: cal.baseline_mv,
+                threshold_mv: cal.threshold_mv,
+                ..SensorConfig::default()
+            }
+        }
+        Ok(None) => {
+            log::info!("No sensor calibration in NVS, using defaults");
+            SensorConfig::default()
+        }
+        Err(e) => {
+            log::warn!("NVS calibration read failed: {e} — using defaults");
+            SensorConfig::default()
         }
     };
 
@@ -99,11 +127,7 @@ fn main() {
         peripherals.pins.gpio10,
         peripherals.pins.gpio11,
         peripherals.pins.gpio12,
-        SensorConfig {
-            baseline_mv: 1440,
-            threshold_mv: 200,
-            settle_delay_ms: 2,
-        },
+        sensor_config,
     )
     .expect("failed to init sensor");
 

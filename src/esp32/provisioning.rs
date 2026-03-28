@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 use embedded_svc::io::Write;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::http::server::{Configuration as HttpConfig, EspHttpServer};
-use esp_idf_svc::nvs::{EspNvs, NvsDefault};
+use esp_idf_svc::nvs::{EspNvs, EspNvsPartition, NvsCustom, NvsDefault};
 use esp_idf_svc::wifi::{AccessPointConfiguration, AuthMethod, Configuration, EspWifi};
 
+use crate::esp32::config::{SensorCalibration, SensorConfig};
 use crate::provisioning::{BoardConfig, ValidationError};
 
 const KEY_WIFI_SSID: &str = "wifi_ssid";
@@ -82,6 +83,48 @@ impl BoardConfig {
         nvs.set_u8(KEY_LICHESS_LEVEL, self.lichess_level)
             .map_err(ProvisioningError::Nvs)?;
 
+        Ok(())
+    }
+}
+
+const CAL_NAMESPACE: &str = "cal";
+const KEY_CAL_BASELINE: &str = "cal_baseline";
+const KEY_CAL_THRESHOLD: &str = "cal_threshold";
+
+impl SensorCalibration {
+    pub fn load(partition: &EspNvsPartition<NvsCustom>) -> Result<Option<Self>, ProvisioningError> {
+        let nvs = match EspNvs::new(partition.clone(), CAL_NAMESPACE, false) {
+            Ok(nvs) => nvs,
+            Err(e) if e.code() == esp_idf_svc::sys::ESP_ERR_NVS_NOT_FOUND => return Ok(None),
+            Err(e) => return Err(ProvisioningError::Nvs(e)),
+        };
+
+        let baseline_mv = match nvs
+            .get_u16(KEY_CAL_BASELINE)
+            .map_err(ProvisioningError::Nvs)?
+        {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+
+        let threshold_mv = nvs
+            .get_u16(KEY_CAL_THRESHOLD)
+            .map_err(ProvisioningError::Nvs)?
+            .unwrap_or(SensorConfig::default().threshold_mv);
+
+        Ok(Some(SensorCalibration {
+            baseline_mv,
+            threshold_mv,
+        }))
+    }
+
+    pub fn save(&self, partition: &EspNvsPartition<NvsCustom>) -> Result<(), ProvisioningError> {
+        let nvs =
+            EspNvs::new(partition.clone(), CAL_NAMESPACE, true).map_err(ProvisioningError::Nvs)?;
+        nvs.set_u16(KEY_CAL_BASELINE, self.baseline_mv)
+            .map_err(ProvisioningError::Nvs)?;
+        nvs.set_u16(KEY_CAL_THRESHOLD, self.threshold_mv)
+            .map_err(ProvisioningError::Nvs)?;
         Ok(())
     }
 }

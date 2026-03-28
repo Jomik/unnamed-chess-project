@@ -17,6 +17,24 @@ pub enum SensorError {
     GpioError,
 }
 
+/// Raw ADC millivolt readings for all 64 squares from a single scan.
+///
+/// Indexed by [`Square`] as `usize`. shakmaty's `Square` is `repr(u8)`
+/// with A1=0, B1=1, ..., H8=63.
+#[derive(Debug, Clone)]
+pub struct RawScan {
+    pub mv: [u16; 64],
+}
+
+impl RawScan {
+    /// Signed deviation from baseline for a given square.
+    /// Positive = above baseline (white piece direction),
+    /// negative = below baseline (black piece direction).
+    pub fn deviation(&self, sq: Square, baseline_mv: u16) -> i32 {
+        self.mv[sq as usize] as i32 - baseline_mv as i32
+    }
+}
+
 /// Drives the 4 shared mux address lines (S0-S3) that select which of the
 /// 16 channels is active on all CD74HC4067 chips simultaneously.
 ///
@@ -180,14 +198,13 @@ impl<'a> Esp32PieceSensor<'a> {
             config,
         })
     }
-}
 
-impl PieceSensor for Esp32PieceSensor<'_> {
-    type Error = SensorError;
-
-    fn read_positions(&mut self) -> Result<ByColor<Bitboard>, SensorError> {
-        let mut white = Bitboard::EMPTY;
-        let mut black = Bitboard::EMPTY;
+    /// Perform a full 64-square scan and return raw millivolt readings.
+    ///
+    /// This is the low-level scan primitive. [`PieceSensor::read_positions`]
+    /// delegates to this method and applies thresholding.
+    pub fn read_raw(&mut self) -> Result<RawScan, SensorError> {
+        let mut scan = RawScan { mv: [0; 64] };
 
         for channel in 0..CHANNELS_PER_MUX as u8 {
             self.address_lines.select(channel)?;
@@ -195,14 +212,32 @@ impl PieceSensor for Esp32PieceSensor<'_> {
 
             for (mux_idx, mux) in self.mux_channels.iter_mut().enumerate() {
                 let mv = mux.read(channel)?;
-                let deviation = mv.abs_diff(self.config.baseline_mv);
-                if deviation > self.config.threshold_mv {
-                    let sq = square_for(mux_idx, channel);
-                    if mv > self.config.baseline_mv {
-                        white.toggle(sq);
-                    } else {
-                        black.toggle(sq);
-                    }
+                let sq = square_for(mux_idx, channel);
+                scan.mv[sq as usize] = mv;
+            }
+        }
+
+        Ok(scan)
+    }
+}
+
+impl PieceSensor for Esp32PieceSensor<'_> {
+    type Error = SensorError;
+
+    fn read_positions(&mut self) -> Result<ByColor<Bitboard>, SensorError> {
+        let scan = self.read_raw()?;
+        let mut white = Bitboard::EMPTY;
+        let mut black = Bitboard::EMPTY;
+
+        for sq_idx in 0..64u32 {
+            let mv = scan.mv[sq_idx as usize];
+            let deviation = mv.abs_diff(self.config.baseline_mv);
+            if deviation > self.config.threshold_mv {
+                let sq = Square::new(sq_idx);
+                if mv > self.config.baseline_mv {
+                    white.toggle(sq);
+                } else {
+                    black.toggle(sq);
                 }
             }
         }

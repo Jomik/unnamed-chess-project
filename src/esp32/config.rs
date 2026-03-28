@@ -13,7 +13,7 @@ impl Rgb8 {
 }
 
 /// Sensor configuration for ADC thresholds and timing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SensorConfig {
     /// Resting ADC output (mV) with no magnet. DRV5055A3 is ratiometric at VCC/2.
     pub baseline_mv: u16,
@@ -21,6 +21,26 @@ pub struct SensorConfig {
     pub threshold_mv: u16,
     /// Delay (ms) after switching mux address lines to let the analog signal settle.
     pub settle_delay_ms: u32,
+}
+
+impl Default for SensorConfig {
+    fn default() -> Self {
+        Self {
+            baseline_mv: 1440,
+            threshold_mv: 100,
+            settle_delay_ms: 2,
+        }
+    }
+}
+
+/// Per-board sensor calibration derived from the diagnostics binary.
+///
+/// Stored in NVS and loaded by the production firmware to replace
+/// hardcoded defaults. See `docs/specs/2026-03-28-sensor-diagnostics-design.md`.
+#[derive(Debug, Clone, Copy)]
+pub struct SensorCalibration {
+    pub baseline_mv: u16,
+    pub threshold_mv: u16,
 }
 
 /// Display configuration for LED colors.

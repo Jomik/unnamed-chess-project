@@ -8,5 +8,5 @@ mod wifi;
 pub use display::{Esp32LedDisplay, LedDisplayError};
 pub use lichess::{Esp32LichessClient, Esp32LichessError};
 pub use provisioning::ProvisioningError;
-pub use sensor::{Esp32PieceSensor, SensorError};
+pub use sensor::{Esp32PieceSensor, RawScan, SensorError};
 pub use wifi::{WifiConnection, WifiError};
