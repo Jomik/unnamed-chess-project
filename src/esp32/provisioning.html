@@ -10,6 +10,7 @@
         input { width: 100%; padding: 0.5em; margin-top: 0.25em; box-sizing: border-box; }
         button { margin-top: 1.5em; padding: 0.75em 2em; font-size: 1em; }
         .error { color: #c00; margin-top: 1em; padding: 0.5em; border: 1px solid #c00; }
+        .success { color: #060; margin-top: 1em; padding: 0.5em; border: 1px solid #060; background: #efe; }
         .hint { font-size: 0.85em; color: #666; margin-top: 0.25em; }
         fieldset { border: 1px solid #ccc; padding: 1em; margin-top: 1.5em; }
         legend { font-weight: bold; }
@@ -17,32 +18,41 @@
 </head>
 <body>
     <h1>Chess Board Setup</h1>
+    <!-- STATUS -->
     <!-- ERRORS -->
     <form method="POST" action="/" autocomplete="off">
         <fieldset>
             <legend>WiFi</legend>
             <label for="wifi_ssid">Network Name (SSID)</label>
-            <input type="text" id="wifi_ssid" name="wifi_ssid" required maxlength="32" autocomplete="off">
+            <input type="text" id="wifi_ssid" name="wifi_ssid" required maxlength="32" autocomplete="off" value="<!-- VAL_wifi_ssid -->">
 
             <label for="wifi_pass">Password</label>
-            <input type="text" id="wifi_pass" name="wifi_pass" required maxlength="64" autocomplete="off">
+            <input type="text" id="wifi_pass" name="wifi_pass" maxlength="64" autocomplete="off" value="<!-- VAL_wifi_pass -->">
         </fieldset>
 
         <fieldset>
             <legend>Lichess (optional)</legend>
             <label for="lichess_token">API Token</label>
-            <input type="text" id="lichess_token" name="lichess_token" maxlength="127">
+            <input type="text" id="lichess_token" name="lichess_token" maxlength="127" value="<!-- VAL_lichess_token -->">
             <p class="hint">
-                <a href="https://lichess.org/account/oauth/token/create?scopes[]=board:play&scopes[]=challenge:write&description=Chess+Board">
+                <a href="https://lichess.org/account/oauth/token/create?scopes[]=board:play&scopes[]=challenge:write&description=Chess+Board" target="_blank" rel="noopener">
                     Create a token on lichess.org
                 </a>
             </p>
 
             <label for="lichess_level">AI Level (1–8)</label>
-            <input type="number" id="lichess_level" name="lichess_level" min="1" max="8" value="2">
+            <input type="number" id="lichess_level" name="lichess_level" min="1" max="8" value="<!-- VAL_lichess_level -->">
         </fieldset>
 
         <button type="submit">Save &amp; Connect</button>
     </form>
+    <script>
+    document.querySelector('form').addEventListener('submit', function() {
+        var ssid = document.getElementById('wifi_ssid').value;
+        var btn = document.querySelector('button[type="submit"]');
+        btn.disabled = true;
+        btn.textContent = 'Scanning for ' + ssid + '...';
+    });
+    </script>
 </body>
 </html>

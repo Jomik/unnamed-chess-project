@@ -87,12 +87,15 @@ fn main() {
     if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Pending)) {
         log::warn!("LED update failed: {e}");
     }
+    let auth_method =
+        unnamed_chess_project::esp32::provisioning::u8_to_auth_method(config.wifi_auth);
     let _wifi = match WifiConnection::connect(
         peripherals.modem,
         sys_loop,
         nvs_partition,
         &config.wifi_ssid,
         &config.wifi_pass,
+        auth_method,
     ) {
         Ok(wifi) => {
             log::info!("WiFi connected");

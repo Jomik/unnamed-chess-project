@@ -5,6 +5,8 @@
 pub struct BoardConfig {
     pub wifi_ssid: String,
     pub wifi_pass: String,
+    /// WiFi auth method as numeric code: 0 = None, 3 = WPA2, 6 = WPA3.
+    pub wifi_auth: u8,
     pub lichess_token: Option<String>,
     pub lichess_level: u8,
 }
@@ -35,7 +37,7 @@ impl BoardConfig {
         if self.wifi_ssid.len() > 32 {
             return Err(ValidationError::SsidTooLong);
         }
-        if self.wifi_pass.is_empty() {
+        if self.wifi_pass.is_empty() && self.wifi_auth != 0 {
             return Err(ValidationError::PasswordEmpty);
         }
         if self.wifi_pass.len() > 64 {
@@ -56,6 +58,7 @@ mod tests {
         BoardConfig {
             wifi_ssid: "MyNetwork".into(),
             wifi_pass: "secret123".into(),
+            wifi_auth: 3,
             lichess_token: None,
             lichess_level: 2,
         }
@@ -157,5 +160,53 @@ mod tests {
     #[test]
     fn default_level_is_two() {
         assert_eq!(BoardConfig::DEFAULT_LEVEL, 2);
+    }
+
+    #[test]
+    fn open_network_empty_password_valid() {
+        let c = BoardConfig {
+            wifi_ssid: "GuestWifi".into(),
+            wifi_pass: String::new(),
+            wifi_auth: 0,
+            lichess_token: None,
+            lichess_level: 2,
+        };
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn open_network_with_password_valid() {
+        let c = BoardConfig {
+            wifi_ssid: "GuestWifi".into(),
+            wifi_pass: "ignored".into(),
+            wifi_auth: 0,
+            lichess_token: None,
+            lichess_level: 2,
+        };
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn wpa2_empty_password_rejected() {
+        let c = BoardConfig {
+            wifi_ssid: "MyNetwork".into(),
+            wifi_pass: String::new(),
+            wifi_auth: 3,
+            lichess_token: None,
+            lichess_level: 2,
+        };
+        assert!(matches!(c.validate(), Err(ValidationError::PasswordEmpty)));
+    }
+
+    #[test]
+    fn wpa3_empty_password_rejected() {
+        let c = BoardConfig {
+            wifi_ssid: "MyNetwork".into(),
+            wifi_pass: String::new(),
+            wifi_auth: 6,
+            lichess_token: None,
+            lichess_level: 2,
+        };
+        assert!(matches!(c.validate(), Err(ValidationError::PasswordEmpty)));
     }
 }
