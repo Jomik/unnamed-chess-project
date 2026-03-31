@@ -1,7 +1,7 @@
 use core::time::Duration;
 
 use esp_idf_svc::hal::gpio::OutputPin;
-use esp_idf_svc::hal::rmt::config::{TransmitConfig, TxChannelConfig};
+use esp_idf_svc::hal::rmt::config::{MemoryAccess, TransmitConfig, TxChannelConfig};
 use esp_idf_svc::hal::rmt::encoder::{BytesEncoder, BytesEncoderConfig, RawEncoder};
 use esp_idf_svc::hal::rmt::{PinState, Symbol, TxChannelDriver};
 use esp_idf_svc::hal::units::FromValueType;
@@ -107,6 +107,9 @@ impl<'d> Esp32LedDisplay<'d> {
     pub fn new(pin: impl OutputPin + 'd, palette: LedPalette) -> Result<Self, LedDisplayError> {
         let tx_config = TxChannelConfig {
             resolution: RMT_RESOLUTION_HZ.Hz(),
+            memory_access: MemoryAccess::Direct {
+                memory_block_symbols: 1024,
+            },
             ..Default::default()
         };
         let channel = TxChannelDriver::new(pin, &tx_config)
