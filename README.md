@@ -44,8 +44,11 @@ The ESP toolchain is required (`cargo +esp`). The `just` tasks handle
 target selection and toolchain flags automatically.
 
 ```bash
-just build   # Build firmware
-just flash   # Flash to device and monitor serial output
+just build       # Build firmware
+just flash       # Flash to device and monitor serial output
+just flash-diag  # Flash diagnostics/calibration binary
+just erase-nvs   # Erase WiFi/Lichess config (triggers reprovisioning)
+just erase-cal   # Erase sensor calibration (triggers recalibration)
 ```
 
 Run `just` with no arguments to see all available tasks.
@@ -57,6 +60,18 @@ On first boot (or after `just erase-nvs`), the board enters provisioning mode:
 1. Connect to the **ChessBoard** WiFi network from your phone or computer
 2. Navigate to `192.168.71.1`
 3. Enter your WiFi credentials and optionally configure Lichess
+
+### Sensor Calibration
+
+For reliable piece detection, run the diagnostics binary to calibrate per-board sensor thresholds:
+
+```bash
+just flash-diag   # Flash diagnostics binary and monitor serial
+```
+
+The diagnostics binary walks through three phases: assembly check (LED sweep → empty board scan → starting position scan), calibration (derives threshold from noise floor and weakest piece signal), and change-based diagnosis (logs sensor changes to identify noisy squares). Calibration data is stored in a separate NVS partition and survives `just erase-nvs`. Use `just erase-cal` to force recalibration.
+
+Without calibration, the firmware falls back to conservative defaults that may not work well for all boards.
 
 ### Lichess Integration (optional)
 

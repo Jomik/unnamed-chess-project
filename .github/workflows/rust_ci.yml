@@ -4,15 +4,7 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "justfile"
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "justfile"
   workflow_dispatch:
 
 env:
@@ -20,8 +12,29 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Check for code changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - '.github/workflows/**'
+
   host-checks:
     name: Host Checks
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -47,7 +60,8 @@ jobs:
 
   esp-checks:
     name: ESP32 Checks
-    needs: host-checks
+    needs: [changes, host-checks]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -57,9 +71,6 @@ jobs:
             args: --release --target xtensa-esp32s3-espidf
           - command: +esp clippy
             args: --all-targets --all-features --workspace -- -D warnings
-    env:
-      WIFI_SSID: "ci-placeholder"
-      WIFI_PASSWORD: "ci-placeholder"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
