@@ -1,5 +1,6 @@
-# Rust often needs a bit of an extra main task stack size compared to C (the default is 3K)
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8000
+# Rust often needs a bit of an extra main task stack size compared to C (the default is 3K).
+# Increased to 16K to support BLE operations alongside normal gameplay.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16000
 
 # Use this to set FreeRTOS kernel tick frequency to 1000 Hz (100 Hz by default).
 # This allows to use 1 ms granularity for thread sleeps (10 ms by default).
@@ -12,4 +13,10 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 # Suppress noisy "Certificate validated" logs from the TLS bundle
 # (fires on every HTTPS connection — clutters serial output)
 CONFIG_ESP_X509_CRT_BUNDLE_LOG_LEVEL_WARN=y
+
+# Enable BLE via NimBLE stack (lighter than Bluedroid for BLE-only)
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_SM_LEGACY=y
+CONFIG_BT_NIMBLE_SM_SC=y
 
