@@ -59,10 +59,6 @@ impl Player for HumanPlayer {
 
         None
     }
-
-    fn opponent_moved(&mut self, _position: &Chess, _opponent_move: &Move) {
-        // No-op — recovery LEDs guide the human to physically execute the opponent's move.
-    }
 }
 
 #[cfg(test)]

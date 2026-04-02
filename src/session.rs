@@ -178,6 +178,16 @@ mod tests {
         (sensor, session)
     }
 
+    fn engine_vs_human() -> (ScriptedSensor, GameSession) {
+        let sensor = ScriptedSensor::new();
+        let initial = sensor.read_positions();
+        let session = GameSession::new(
+            Box::new(EmbeddedEngine::new(42)),
+            Box::new(HumanPlayer::new(initial)),
+        );
+        (sensor, session)
+    }
+
     /// Test player that delays returning a move for N ticks.
     struct DelayedPlayer {
         delay_ticks: usize,
@@ -221,7 +231,6 @@ mod tests {
         fn poll_move(&mut self, _position: &Chess, _sensors: ByColor<Bitboard>) -> Option<Move> {
             None
         }
-        fn opponent_moved(&mut self, _position: &Chess, _opponent_move: &Move) {}
         fn status(&self) -> PlayerStatus {
             PlayerStatus::Error
         }
@@ -456,7 +465,6 @@ mod tests {
             ) -> Option<Move> {
                 None // never moves — simulates a thinking engine
             }
-            fn opponent_moved(&mut self, _position: &Chess, _opponent_move: &Move) {}
             fn is_interactive(&self) -> bool {
                 false
             }
@@ -511,6 +519,23 @@ mod tests {
         assert!(
             !EmbeddedEngine::new(42).is_interactive(),
             "EmbeddedEngine should not be interactive"
+        );
+    }
+
+    #[test]
+    fn engine_as_white_moves_on_first_tick() {
+        let (sensor, mut session) = engine_vs_human();
+
+        // Engine is white — should produce a move on the very first tick.
+        let result = session.tick(sensor.read_positions());
+        assert!(
+            result.last_move.is_some(),
+            "engine playing white should move on first tick"
+        );
+        assert_eq!(
+            session.position().turn(),
+            Color::Black,
+            "after engine's first move, it should be black's turn"
         );
     }
 

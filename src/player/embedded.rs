@@ -8,16 +8,12 @@ use super::Player;
 /// then queen promotions, then a random non-king move.
 #[derive(Debug)]
 pub struct EmbeddedEngine {
-    pending: Option<Move>,
     rng_state: u32,
 }
 
 impl EmbeddedEngine {
     pub fn new(seed: u32) -> Self {
-        Self {
-            pending: None,
-            rng_state: seed,
-        }
+        Self { rng_state: seed }
     }
 
     /// Xorshift32 PRNG — minimal RNG suitable for embedded use.
@@ -42,15 +38,7 @@ fn victim_value(role: Role) -> u8 {
 }
 
 impl Player for EmbeddedEngine {
-    fn poll_move(&mut self, _position: &Chess, _sensors: ByColor<Bitboard>) -> Option<Move> {
-        self.pending.take()
-    }
-
-    fn is_interactive(&self) -> bool {
-        false
-    }
-
-    fn opponent_moved(&mut self, position: &Chess, _opponent_move: &Move) {
+    fn poll_move(&mut self, position: &Chess, _sensors: ByColor<Bitboard>) -> Option<Move> {
         let moves = position.legal_moves();
         let is_allowed = |mv: &Move| mv.promotion().is_none_or(|r| r == Role::Queen);
 
@@ -81,32 +69,28 @@ impl Player for EmbeddedEngine {
             }
         };
 
-        let chosen = best_capture.or(castle).or(promotion).or_else(random_move);
-        self.pending = chosen.cloned();
+        best_capture
+            .or(castle)
+            .or(promotion)
+            .or_else(random_move)
+            .cloned()
+    }
+
+    fn is_interactive(&self) -> bool {
+        false
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shakmaty::{CastlingMode, Square, fen::Fen};
+    use shakmaty::{CastlingMode, fen::Fen};
 
     fn position_from_fen(fen: &str) -> Chess {
         let setup: Fen = fen.parse().expect("valid FEN");
         setup
             .into_position(CastlingMode::Standard)
             .expect("valid position")
-    }
-
-    /// Dummy human move for tests — EmbeddedEngine ignores it.
-    fn dummy_move() -> Move {
-        Move::Normal {
-            role: Role::Pawn,
-            from: Square::E2,
-            to: Square::E4,
-            capture: None,
-            promotion: None,
-        }
     }
 
     fn dummy_sensors() -> ByColor<Bitboard> {
@@ -121,7 +105,6 @@ mod tests {
         // Black knight on c4 can capture queen on d2 or pawn on e3
         let pos = position_from_fen("8/8/8/8/2n5/4P3/3Q4/4K1k1 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.opponent_moved(&pos, &dummy_move());
         let mv = engine
             .poll_move(&pos, dummy_sensors())
             .expect("should have a move");
@@ -134,7 +117,6 @@ mod tests {
         // After 1. e4 — black has no captures available
         let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.opponent_moved(&pos, &dummy_move());
         let mv = engine
             .poll_move(&pos, dummy_sensors())
             .expect("should have a move");
@@ -146,7 +128,6 @@ mod tests {
         // Black can castle both sides
         let pos = position_from_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.opponent_moved(&pos, &dummy_move());
         let mv = engine
             .poll_move(&pos, dummy_sensors())
             .expect("should have a move");
@@ -158,7 +139,6 @@ mod tests {
         // Black pawn on d2 about to promote
         let pos = position_from_fen("8/8/8/8/8/k7/3p4/K7 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.opponent_moved(&pos, &dummy_move());
         let mv = engine
             .poll_move(&pos, dummy_sensors())
             .expect("should have a move");
@@ -171,7 +151,6 @@ mod tests {
         let pos = position_from_fen("6k1/8/5n2/8/8/8/8/4K3 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
         for _ in 0..20 {
-            engine.opponent_moved(&pos, &dummy_move());
             let mv = engine
                 .poll_move(&pos, dummy_sensors())
                 .expect("should have a move");
@@ -184,7 +163,6 @@ mod tests {
         // Lone black king — only king moves are legal
         let pos = position_from_fen("8/8/8/8/8/8/8/k3K3 b - - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.opponent_moved(&pos, &dummy_move());
         let mv = engine
             .poll_move(&pos, dummy_sensors())
             .expect("should have a move");
@@ -192,11 +170,23 @@ mod tests {
     }
 
     #[test]
-    fn poll_returns_none_after_consumed() {
+    fn poll_returns_move_every_call() {
+        // Engine computes fresh each call — always returns Some when moves are available
         let pos = position_from_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
         let mut engine = EmbeddedEngine::new(42);
-        engine.opponent_moved(&pos, &dummy_move());
-        let _ = engine.poll_move(&pos, dummy_sensors());
-        assert!(engine.poll_move(&pos, dummy_sensors()).is_none());
+        assert!(engine.poll_move(&pos, dummy_sensors()).is_some());
+        assert!(engine.poll_move(&pos, dummy_sensors()).is_some());
+    }
+
+    #[test]
+    fn engine_moves_as_white_without_opponent_moved() {
+        // Regression: engine playing white must move on first poll, before opponent_moved is called
+        let pos = Chess::default();
+        let mut engine = EmbeddedEngine::new(42);
+        let mv = engine.poll_move(&pos, dummy_sensors());
+        assert!(
+            mv.is_some(),
+            "engine should return a move on first poll without needing opponent_moved"
+        );
     }
 }
