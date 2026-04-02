@@ -28,9 +28,10 @@ pub trait Player {
 
     /// Notification that the opponent just played.
     ///
-    /// `position` is the post-move state. Computer players start thinking here.
-    /// Human players can ignore this — recovery LEDs guide the physical execution.
-    fn opponent_moved(&mut self, position: &Chess, opponent_move: &Move);
+    /// `position` is the post-move state. Override for async players (e.g. Lichess)
+    /// that need to send the move to an external service.
+    /// Default is a no-op.
+    fn opponent_moved(&mut self, _position: &Chess, _opponent_move: &Move) {}
 
     /// Player health. Checked by session each tick.
     fn status(&self) -> PlayerStatus {
