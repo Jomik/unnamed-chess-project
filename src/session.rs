@@ -1,36 +1,30 @@
 use shakmaty::{Bitboard, ByColor, Chess, Color, Move, Position};
 
+use crate::ble_protocol::{GameState, GameStatus};
 use crate::feedback::{BoardFeedback, StatusKind, compute_feedback, compute_state_feedback};
 use crate::player::{Player, PlayerStatus};
 
-/// Result of processing one sensor frame.
 #[derive(Debug, Clone)]
 pub struct TickResult {
-    /// Computed board feedback (move guidance, recovery, status).
     pub feedback: BoardFeedback,
-    /// The move committed during this tick, if any (by either player).
     pub last_move: Option<Move>,
 }
 
-/// Owns the game lifecycle: chess position and two players.
-///
-/// Encapsulates the per-tick orchestration: poll active player → apply move
-/// → notify opponent → compute feedback.
+/// Per-tick orchestration: poll active player -> apply move -> notify opponent -> compute feedback.
 pub struct GameSession {
     position: Chess,
     white: Box<dyn Player>,
     black: Box<dyn Player>,
     reference_sensors: ByColor<Bitboard>,
     illegal_move: bool,
+    resigned: Option<Color>,
 }
 
 impl GameSession {
-    /// Create a session from the standard starting position.
     pub fn new(white: Box<dyn Player>, black: Box<dyn Player>) -> Self {
         Self::from_position(Chess::default(), white, black)
     }
 
-    /// Create a session from a specific position.
     pub fn from_position(position: Chess, white: Box<dyn Player>, black: Box<dyn Player>) -> Self {
         let board = position.board();
         let reference_sensors = ByColor {
@@ -43,11 +37,47 @@ impl GameSession {
             black,
             reference_sensors,
             illegal_move: false,
+            resigned: None,
         }
     }
 
-    /// Process one sensor frame.
+    /// Subsequent `tick()` calls short-circuit: the position is not advanced.
+    pub fn resign(&mut self, color: Color) {
+        self.resigned = Some(color);
+    }
+
+    pub fn is_game_over(&self) -> bool {
+        self.resigned.is_some() || self.position.legal_moves().is_empty()
+    }
+
+    pub fn game_state(&self) -> GameState {
+        let legal_moves = self.position.legal_moves();
+        let status = if self.resigned.is_some() {
+            GameStatus::Resignation
+        } else if legal_moves.is_empty() {
+            if self.position.is_check() {
+                GameStatus::Checkmate
+            } else {
+                GameStatus::Stalemate
+            }
+        } else {
+            GameStatus::InProgress
+        };
+
+        let turn = self.position.turn();
+
+        GameState { status, turn }
+    }
+
     pub fn tick(&mut self, sensors: ByColor<Bitboard>) -> TickResult {
+        // Short-circuit: game already ended.
+        if self.is_game_over() {
+            return TickResult {
+                feedback: compute_state_feedback(&self.position, sensors),
+                last_move: None,
+            };
+        }
+
         let mut last_move = None;
 
         // Poll the active player.
@@ -105,7 +135,6 @@ impl GameSession {
         }
     }
 
-    /// Read-only access to the current chess position.
     #[inline]
     pub fn position(&self) -> &Chess {
         &self.position
@@ -482,6 +511,154 @@ mod tests {
         assert!(
             !EmbeddedEngine::new(42).is_interactive(),
             "EmbeddedEngine should not be interactive"
+        );
+    }
+
+    // ── resign / is_game_over / game_state ────────────────────────────────────
+
+    #[test]
+    fn resign_sets_game_over() {
+        let (_sensor, mut session) = human_vs_human();
+
+        assert!(!session.is_game_over(), "new game should not be over");
+        session.resign(Color::White);
+        assert!(
+            session.is_game_over(),
+            "game should be over after resignation"
+        );
+    }
+
+    #[test]
+    fn game_state_in_progress_for_new_session() {
+        use crate::ble_protocol::GameStatus;
+
+        let (_sensor, session) = human_vs_human();
+        let state = session.game_state();
+
+        assert_eq!(state.status, GameStatus::InProgress);
+        assert_eq!(state.turn, Color::White);
+    }
+
+    #[test]
+    fn game_state_resignation_after_resign() {
+        use crate::ble_protocol::GameStatus;
+
+        let (_sensor, mut session) = human_vs_human();
+        session.resign(Color::Black);
+
+        let state = session.game_state();
+        assert_eq!(state.status, GameStatus::Resignation);
+        // Turn should still reflect the current (unmodified) position.
+        assert_eq!(state.turn, Color::White);
+    }
+
+    #[test]
+    fn tick_short_circuits_when_resigned() {
+        let (mut sensor, mut session) = human_vs_human();
+
+        session.resign(Color::White);
+
+        // Even pushing a human move script should not advance the position.
+        sensor.push_script("e2 We4.").unwrap();
+        let result = run_script(&mut sensor, &mut session);
+
+        assert!(
+            result.last_move.is_none(),
+            "no move should be processed after resignation"
+        );
+        assert_eq!(
+            session.position().turn(),
+            Color::White,
+            "turn should not advance after resignation"
+        );
+    }
+
+    #[test]
+    fn game_state_checkmate() {
+        use crate::ble_protocol::GameStatus;
+
+        // Fool's mate: white is checkmated
+        let fen = "rnb1kbnr/pppp1ppp/4p3/8/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
+        let position: Chess = fen
+            .parse::<shakmaty::fen::Fen>()
+            .unwrap()
+            .into_position(shakmaty::CastlingMode::Standard)
+            .unwrap();
+
+        let board = position.board();
+        let sensors = ByColor {
+            white: board.by_color(Color::White),
+            black: board.by_color(Color::Black),
+        };
+        let session = GameSession::from_position(
+            position,
+            Box::new(HumanPlayer::new(sensors)),
+            Box::new(EmbeddedEngine::new(42)),
+        );
+
+        assert!(
+            session.is_game_over(),
+            "game should be over in checkmate position"
+        );
+        let state = session.game_state();
+        assert_eq!(
+            state.status,
+            GameStatus::Checkmate,
+            "game_state should report Checkmate status"
+        );
+        assert_eq!(
+            state.turn,
+            Color::White,
+            "turn should be white (checkmated side)"
+        );
+    }
+
+    #[test]
+    fn game_state_stalemate() {
+        use crate::ble_protocol::GameStatus;
+
+        // Classic stalemate: black king trapped, no legal moves, not in check
+        let fen = "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1";
+        let position: Chess = fen
+            .parse::<shakmaty::fen::Fen>()
+            .unwrap()
+            .into_position(shakmaty::CastlingMode::Standard)
+            .unwrap();
+
+        // Verify this is actually a stalemate before testing
+        let legal_moves = position.legal_moves();
+        assert!(
+            legal_moves.is_empty(),
+            "test FEN should have no legal moves, but got {:?}",
+            legal_moves
+        );
+        assert!(!position.is_check(), "test FEN should not be in check");
+
+        let board = position.board();
+        let sensors = ByColor {
+            white: board.by_color(Color::White),
+            black: board.by_color(Color::Black),
+        };
+        let session = GameSession::from_position(
+            position,
+            Box::new(HumanPlayer::new(sensors)),
+            Box::new(EmbeddedEngine::new(42)),
+        );
+
+        assert!(
+            session.is_game_over(),
+            "game should be over in stalemate position"
+        );
+        let state = session.game_state();
+        assert_eq!(
+            state.status,
+            GameStatus::Stalemate,
+            "game_state should report Stalemate status"
+        );
+        assert_eq!(
+            state.turn,
+            Color::Black,
+            "turn should be black (stalemated side)"
         );
     }
 }

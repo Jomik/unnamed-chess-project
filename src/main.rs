@@ -1,58 +1,25 @@
 #[cfg(target_os = "espidf")]
 fn main() {
-    use esp_idf_svc::eventloop::EspSystemEventLoop;
     use esp_idf_svc::hal::adc::oneshot::AdcDriver;
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
-    use esp_idf_svc::nvs::{
-        EspDefaultNvsPartition, EspNvs, EspNvsPartition, NvsCustom, NvsDefault,
+    use esp_idf_svc::nvs::{EspNvsPartition, NvsCustom};
+    use shakmaty::Color;
+    use unnamed_chess_project::ble_protocol::{
+        BleCommand, CommandResult, GameState, PlayerConfig, UNSET_BYTE,
     };
     use unnamed_chess_project::esp32::config::{LedPalette, SensorCalibration, SensorConfig};
-    use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, WifiConnection};
-    use unnamed_chess_project::feedback::{BoardFeedback, StatusKind};
-    use unnamed_chess_project::player::EmbeddedEngine;
-    use unnamed_chess_project::provisioning::BoardConfig;
+    use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, start_ble};
     use unnamed_chess_project::session::GameSession;
-    use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
 
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
     let peripherals = Peripherals::take().expect("failed to take peripherals");
-    let sys_loop = EspSystemEventLoop::take().expect("failed to take event loop");
-    let nvs_partition = EspDefaultNvsPartition::take().expect("failed to take NVS partition");
 
     let mut display = Esp32LedDisplay::new(peripherals.pins.gpio2, LedPalette::default())
         .expect("failed to init LED display");
-
-    // Load config from NVS
-    let nvs = EspNvs::<NvsDefault>::new(nvs_partition.clone(), "config", true)
-        .expect("failed to open NVS namespace");
-
-    let config = match BoardConfig::load(&nvs) {
-        Ok(Some(config)) => config,
-        Ok(None) => {
-            log::info!("No config in NVS — entering provisioning mode");
-            unnamed_chess_project::esp32::provisioning::run_provisioning_server(
-                &mut display,
-                peripherals.modem,
-                sys_loop,
-                nvs_partition,
-                nvs,
-            );
-        }
-        Err(e) => {
-            log::warn!("NVS read error: {e} — entering provisioning mode");
-            unnamed_chess_project::esp32::provisioning::run_provisioning_server(
-                &mut display,
-                peripherals.modem,
-                sys_loop,
-                nvs_partition,
-                nvs,
-            );
-        }
-    };
 
     // Load sensor calibration from the dedicated cal partition (survives erase-nvs)
     let cal_partition =
@@ -75,47 +42,11 @@ fn main() {
             SensorConfig::default()
         }
         Err(e) => {
-            log::warn!("NVS calibration read failed: {e} — using defaults");
+            log::warn!("NVS calibration read failed: {e} -- using defaults");
             SensorConfig::default()
         }
     };
 
-    // Drop NVS handle — partition clone is still available for WiFi
-    drop(nvs);
-
-    // Normal boot: connect WiFi
-    if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Pending)) {
-        log::warn!("LED update failed: {e}");
-    }
-    let _wifi = match WifiConnection::connect(
-        peripherals.modem,
-        sys_loop,
-        nvs_partition,
-        &config.wifi_ssid,
-        &config.wifi_pass,
-    ) {
-        Ok(wifi) => {
-            log::info!("WiFi connected");
-            if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Success)) {
-                log::warn!("LED update failed: {e}");
-            }
-            FreeRtos::delay_ms(500);
-            Some(wifi)
-        }
-        Err(e) => {
-            log::warn!("WiFi failed: {e} — continuing without network");
-            if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Failure)) {
-                log::warn!("LED update failed: {e}");
-            }
-            FreeRtos::delay_ms(500);
-            None
-        }
-    };
-    if let Err(e) = display.show(&BoardFeedback::default()) {
-        log::warn!("LED update failed: {e}");
-    }
-
-    // Init sensor
     let adc_driver = AdcDriver::new(peripherals.adc1).expect("failed to init ADC1");
     let mut sensor = Esp32PieceSensor::new(
         &adc_driver,
@@ -131,8 +62,171 @@ fn main() {
     )
     .expect("failed to init sensor");
 
-    // Wait for starting position
-    log::info!("Waiting for starting position...");
+    let (commands, notifier) = start_ble().expect("failed to start BLE server");
+
+    let mut white_config: Option<PlayerConfig> = None;
+    let mut black_config: Option<PlayerConfig> = None;
+    let mut session: Option<GameSession> = None;
+    let mut prev_positions = None;
+    let mut prev_game_state: Option<GameState> = None;
+
+    log::info!("Entering BLE command loop");
+
+    loop {
+        // Drain BLE commands
+        while let Some(cmd) = commands.try_recv() {
+            match cmd {
+                BleCommand::SetWhitePlayer(config) => {
+                    log::info!("White player set to: {config:?}");
+                    let encoded = config.encode();
+                    notifier.update_player_config(Color::White, &encoded);
+                    white_config = Some(config);
+                }
+                BleCommand::SetBlackPlayer(config) => {
+                    log::info!("Black player set to: {config:?}");
+                    let encoded = config.encode();
+                    notifier.update_player_config(Color::Black, &encoded);
+                    black_config = Some(config);
+                }
+                BleCommand::StartGame => {
+                    if session.is_some() {
+                        log::warn!("StartGame received while game is active");
+                        notifier.notify_command_result(&CommandResult::error(
+                            "game already in progress",
+                        ));
+                        continue;
+                    }
+
+                    let (Some(w_config), Some(b_config)) = (&white_config, &black_config) else {
+                        log::warn!("StartGame received but players not configured");
+                        notifier.notify_command_result(&CommandResult::error(
+                            "both players must be configured",
+                        ));
+                        continue;
+                    };
+
+                    // Reject LichessAi in Phase 1
+                    if matches!(w_config, PlayerConfig::LichessAi { .. }) {
+                        notifier.notify_command_result(&CommandResult::error(
+                            "Lichess AI not supported",
+                        ));
+                        continue;
+                    }
+                    if matches!(b_config, PlayerConfig::LichessAi { .. }) {
+                        notifier.notify_command_result(&CommandResult::error(
+                            "Lichess AI not supported",
+                        ));
+                        continue;
+                    }
+
+                    log::info!("Waiting for starting position...");
+                    let initial_positions =
+                        match wait_for_starting_position(&mut sensor, &mut display) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                log::error!("Initial sensor read failed: {e}");
+                                notifier.notify_command_result(&CommandResult::error(
+                                    "sensor read failed",
+                                ));
+                                continue;
+                            }
+                        };
+                    log::info!("Starting position detected");
+
+                    let white_player = create_player(w_config, initial_positions);
+                    let black_player = create_player(b_config, initial_positions);
+
+                    let new_session = GameSession::new(white_player, black_player);
+                    let state = new_session.game_state();
+                    notifier.notify_command_result(&CommandResult::success());
+                    notifier.notify_game_state(&state);
+                    prev_game_state = Some(state);
+
+                    session = Some(new_session);
+                    prev_positions = Some(initial_positions);
+
+                    log::info!("Game started");
+                }
+                BleCommand::Resign { color } => {
+                    if let Some(ref mut s) = session {
+                        log::info!("{color:?} resigns");
+                        s.resign(color);
+                        let state = s.game_state();
+                        notifier.notify_command_result(&CommandResult::success());
+                        notifier.notify_game_state(&state);
+                        prev_game_state = Some(state);
+                    } else {
+                        log::warn!("Resign received but no game is active");
+                        notifier
+                            .notify_command_result(&CommandResult::error("no game in progress"));
+                    }
+                }
+            }
+        }
+
+        if let Some(ref mut s) = session {
+            let positions = match sensor.read_positions() {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!("Sensor read failed: {e}");
+                    FreeRtos::delay_ms(100);
+                    continue;
+                }
+            };
+
+            log_sensor_changes(prev_positions, positions);
+            prev_positions = Some(positions);
+
+            let result = s.tick(positions);
+
+            if let Some(mv) = &result.last_move {
+                log::info!("Move played: {mv}");
+            }
+
+            if let Err(e) = display.show(&result.feedback) {
+                log::warn!("LED update failed: {e}");
+            }
+
+            let current_state = s.game_state();
+            let state_changed = prev_game_state.as_ref() != Some(&current_state);
+            if state_changed {
+                notifier.notify_game_state(&current_state);
+                prev_game_state = Some(current_state);
+            }
+
+            if s.is_game_over() {
+                let final_state = s.game_state();
+                log::info!("Game over: {:?}", final_state.status);
+
+                session = None;
+                white_config = None;
+                black_config = None;
+                prev_positions = None;
+                prev_game_state = None;
+
+                notifier.update_player_config(Color::White, &[UNSET_BYTE]);
+                notifier.update_player_config(Color::Black, &[UNSET_BYTE]);
+            }
+        }
+
+        FreeRtos::delay_ms(50);
+    }
+}
+
+/// Returns positions from a fresh sensor read after the starting position is confirmed.
+#[cfg(target_os = "espidf")]
+fn wait_for_starting_position<S, D>(
+    sensor: &mut S,
+    display: &mut D,
+) -> Result<shakmaty::ByColor<shakmaty::Bitboard>, S::Error>
+where
+    S: unnamed_chess_project::PieceSensor,
+    D: unnamed_chess_project::BoardDisplay,
+{
+    use esp_idf_svc::hal::delay::FreeRtos;
+    use unnamed_chess_project::feedback::BoardFeedback;
+    use unnamed_chess_project::setup::setup_feedback;
+
     loop {
         let positions = match sensor.read_positions() {
             Ok(p) => p,
@@ -147,121 +241,54 @@ fn main() {
                 if let Err(e) = display.show(&fb) {
                     log::warn!("LED update failed: {e}");
                 }
+                FreeRtos::delay_ms(50);
             }
-            None => break,
-        }
-        FreeRtos::delay_ms(50);
-    }
-    log::info!("Starting position detected");
-    if let Err(e) = display.show(&BoardFeedback::default()) {
-        log::warn!("LED clear failed: {e}");
-    }
-
-    // Choose opponent
-    let opponent: Box<dyn unnamed_chess_project::player::Player> = match config.lichess_token {
-        Some(token) if _wifi.is_some() => {
-            use unnamed_chess_project::esp32::Esp32LichessClient;
-            use unnamed_chess_project::lichess::{LichessConfig, spawn_lichess_opponent};
-
-            let lichess_config = LichessConfig {
-                level: config.lichess_level,
-                clock_limit: 10800,
-                clock_increment: 180,
-            };
-
-            let client = Esp32LichessClient::new(token);
-
-            let spawn_fn = |f: Box<dyn FnOnce() + Send>| -> Result<(), String> {
-                std::thread::Builder::new()
-                    .stack_size(8192)
-                    .spawn(f)
-                    .map(|_| ())
-                    .map_err(|e| e.to_string())
-            };
-
-            match spawn_lichess_opponent(client, lichess_config, spawn_fn) {
-                Ok(lichess_opponent) => {
-                    log::info!("Lichess opponent ready");
-                    if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Success)) {
-                        log::warn!("LED update failed: {e}");
-                    }
-                    FreeRtos::delay_ms(500);
-                    Box::new(lichess_opponent)
+            None => {
+                if let Err(e) = display.show(&BoardFeedback::default()) {
+                    log::warn!("LED clear failed: {e}");
                 }
-                Err(e) => {
-                    log::warn!("Lichess setup failed: {e} — falling back to embedded AI");
-                    if let Err(e) = display.show(&BoardFeedback::with_status(StatusKind::Failure)) {
-                        log::warn!("LED update failed: {e}");
-                    }
-                    FreeRtos::delay_ms(500);
-                    Box::new(EmbeddedEngine::new(unsafe {
-                        esp_idf_svc::sys::esp_random()
-                    }))
-                }
+                return sensor.read_positions();
             }
         }
-        _ => {
-            log::info!("No Lichess token — using embedded AI");
-            Box::new(EmbeddedEngine::new(unsafe {
-                esp_idf_svc::sys::esp_random()
-            }))
-        }
-    };
+    }
+}
 
-    // Game loop (unchanged)
-    use unnamed_chess_project::player::HumanPlayer;
+/// Panics on `LichessAi` -- callers must reject it beforehand.
+#[cfg(target_os = "espidf")]
+fn create_player(
+    config: &unnamed_chess_project::ble_protocol::PlayerConfig,
+    initial_positions: shakmaty::ByColor<shakmaty::Bitboard>,
+) -> Box<dyn unnamed_chess_project::player::Player> {
+    use unnamed_chess_project::ble_protocol::PlayerConfig;
+    use unnamed_chess_project::player::{EmbeddedEngine, HumanPlayer};
 
-    let initial_positions = match sensor.read_positions() {
-        Ok(p) => p,
-        Err(e) => {
-            log::error!("Initial sensor read failed: {e}");
-            return;
-        }
-    };
-    let mut session = GameSession::new(Box::new(HumanPlayer::new(initial_positions)), opponent);
-    let mut prev = initial_positions;
-    log::info!("Game loop started");
+    match config {
+        PlayerConfig::Human => Box::new(HumanPlayer::new(initial_positions)),
+        PlayerConfig::Embedded => Box::new(EmbeddedEngine::new(unsafe {
+            esp_idf_svc::sys::esp_random()
+        })),
+        PlayerConfig::LichessAi { .. } => unreachable!(),
+    }
+}
 
-    loop {
-        let positions = match sensor.read_positions() {
-            Ok(p) => p,
-            Err(e) => {
-                log::warn!("Sensor read failed: {e}");
-                FreeRtos::delay_ms(100);
-                continue;
-            }
-        };
+#[cfg(target_os = "espidf")]
+fn log_sensor_changes(
+    prev: Option<shakmaty::ByColor<shakmaty::Bitboard>>,
+    current: shakmaty::ByColor<shakmaty::Bitboard>,
+) {
+    let Some(prev) = prev else { return };
 
-        let white_added = positions.white & !prev.white;
-        let white_removed = prev.white & !positions.white;
-        let black_added = positions.black & !prev.black;
-        let black_removed = prev.black & !positions.black;
-
-        for sq in white_added {
-            log::debug!("+ {sq} white");
-        }
-        for sq in white_removed {
-            log::debug!("- {sq} white");
-        }
-        for sq in black_added {
-            log::debug!("+ {sq} black");
-        }
-        for sq in black_removed {
-            log::debug!("- {sq} black");
-        }
-        prev = positions;
-
-        let result = session.tick(positions);
-
-        if let Some(mv) = &result.last_move {
-            log::info!("Move played: {mv}");
-        }
-
-        if let Err(e) = display.show(&result.feedback) {
-            log::warn!("LED update failed: {e}");
-        }
-
-        FreeRtos::delay_ms(50);
+    for sq in current.white & !prev.white {
+        log::debug!("+ {sq} white");
+    }
+    for sq in prev.white & !current.white {
+        log::debug!("- {sq} white");
+    }
+    for sq in current.black & !prev.black {
+        log::debug!("+ {sq} black");
+    }
+    for sq in prev.black & !current.black {
+        log::debug!("- {sq} black");
     }
 }
 
