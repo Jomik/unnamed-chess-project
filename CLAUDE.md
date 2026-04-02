@@ -47,6 +47,9 @@ Gate hardware-specific code with `#[cfg(target_os = "espidf")]`. Never mix impor
 ### Data Flow
 
 ```
+BleCommands (mpsc channel) → BleCommand
+    → main.rs drains commands each tick (start game, resign, query state)
+    → BleNotifier pushes state back to characteristics
 PieceSensor::read_positions() → ByColor<Bitboard>
     → GameSession::tick(sensors) → TickResult
         → Player::poll_move() detects/computes move
@@ -54,7 +57,7 @@ PieceSensor::read_positions() → ByColor<Bitboard>
             → BoardDisplay::show(&feedback)
 ```
 
-**GameSession** (`session.rs`) orchestrates the per-tick sequence: poll active player → apply move → notify opponent → compute feedback.
+**GameSession** (`session.rs`) orchestrates the per-tick sequence: poll active player → apply move → notify opponent → compute feedback. `main.rs` also drains `BleCommand`s from the BLE server each tick before calling `session.tick()`.
 
 ### Key Abstractions
 
@@ -68,10 +71,12 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **player/human.rs** — `HumanPlayer`: detects moves from sensor bitboards by matching against legal moves
 - **player/embedded.rs** — `EmbeddedEngine`: heuristic AI (captures > castling > promotions > random)
 - **feedback.rs** — `compute_feedback` and `compute_state_feedback`: feedback from position + sensors. Recovery guidance is integrated as a fallback path.
-- **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame
+- **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame; also exposes `resign()`, `is_game_over()`, and `game_state()` for BLE game lifecycle management
 - **provisioning.rs** — `BoardConfig` struct, `ValidationError`, validation logic (platform-independent, host-testable)
+- **ble_protocol.rs** — `BleCommand`, `PlayerConfig`, `GameState`, `CommandResult`, UUID constants, binary encoding/decoding. Platform-independent, host-testable.
 - **esp32/sensor.rs** — `Esp32PieceSensor`: ADC + mux scanning, `RawScan` for raw millivolt readings, `read_raw()` primitive
-- **esp32/provisioning.rs** — NVS `load`/`save` for `BoardConfig` and `SensorCalibration`, SoftAP + HTTP provisioning server
+- **esp32/ble.rs** — `start_ble()` initializes NimBLE and returns `BleCommands` (command receiver) + `BleNotifier` (characteristic updater). Three GATT services (WiFi/Lichess stubs + Game), typed characteristic handles.
+- **esp32/provisioning.rs** — NVS `load`/`save` for `BoardConfig` and `SensorCalibration`. The SoftAP + HTTP provisioning server is legacy code no longer called from `main.rs`; it will be removed in Phase 2.
 - **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player`
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
 - **testutil/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
@@ -97,11 +102,13 @@ Used by `ScriptedSensor` in `testutil/script.rs` and extensively in `player/huma
 
 ## Provisioning
 
-Runtime configuration (WiFi credentials, Lichess settings) is stored in the ESP32's NVS partition, not in environment variables. On first boot (or after `just erase-nvs`), the board enters SoftAP provisioning mode — connect to the `ChessBoard` WiFi network and navigate to `192.168.71.1` to configure.
+On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE to configure players and start games. WiFi and Lichess configuration will be added in Phase 2.
+
+`just erase-nvs` clears the main NVS partition. In Phase 1 this partition does not store WiFi credentials; it may store BLE bonding keys in the future.
 
 The `IDF_PATH` build variable can still be set in `.env` (loaded via the justfile's `set dotenv-load`).
 
-See `docs/specs/2026-03-26-softap-provisioning-design.md` for the full design.
+See `docs/specs/2026-03-31-ble-companion-app-design.md` for the full design.
 
 ## Sensor Calibration
 
