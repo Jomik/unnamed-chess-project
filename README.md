@@ -101,9 +101,9 @@ The diagnostics binary walks through three phases: assembly check (LED sweep →
 
 Without calibration, the firmware falls back to conservative defaults that may not work well for all boards.
 
-### Lichess Integration (Phase 2)
+### Lichess Integration
 
-Lichess AI integration is planned but not yet available. The board currently uses a built-in heuristic engine for computer play.
+Lichess AI is available via the companion app. Connect the board to WiFi and provide a Lichess API token in the app to play against Lichess AI opponents. The board also has a built-in heuristic engine for offline computer play.
 
 ## Development
 
