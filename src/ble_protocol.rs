@@ -12,6 +12,8 @@ pub enum ProtocolError {
     UnknownAction(u8),
     #[error("unknown color byte: 0x{0:02x}")]
     UnknownColor(u8),
+    #[error("unknown auth mode byte: 0x{0:02x}")]
+    UnknownAuthMode(u8),
 }
 
 /// Sentinel byte indicating a player slot has not yet been configured.
@@ -120,6 +122,7 @@ pub enum BleCommand {
     SetBlackPlayer(PlayerConfig),
     StartGame,
     Resign { color: Color },
+    ConfigureWifi(WifiConfig),
 }
 
 impl BleCommand {
@@ -200,6 +203,178 @@ impl CommandResult {
         let mut out = Vec::with_capacity(3 + msg_bytes.len());
         out.push(ok_byte);
         out.push(self.source as u8);
+        out.push(msg_len);
+        out.extend_from_slice(msg_bytes);
+        out
+    }
+}
+
+/// WiFi authentication mode.
+///
+/// Wire encoding:
+/// - Open:  0x00
+/// - WPA2:  0x01
+/// - WPA3:  0x02
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WifiAuthMode {
+    Open = 0x00,
+    Wpa2 = 0x01,
+    Wpa3 = 0x02,
+}
+
+impl WifiAuthMode {
+    pub fn from_byte(byte: u8) -> Result<Self, ProtocolError> {
+        match byte {
+            0x00 => Ok(WifiAuthMode::Open),
+            0x01 => Ok(WifiAuthMode::Wpa2),
+            0x02 => Ok(WifiAuthMode::Wpa3),
+            other => Err(ProtocolError::UnknownAuthMode(other)),
+        }
+    }
+}
+
+impl From<WifiAuthMode> for u8 {
+    fn from(mode: WifiAuthMode) -> u8 {
+        mode as u8
+    }
+}
+
+/// WiFi configuration sent via BLE.
+///
+/// Wire encoding: `[ssid_len: u8, ssid_bytes..., pass_len: u8, pass_bytes..., auth_mode: u8]`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WifiConfig {
+    pub ssid: String,
+    pub password: String,
+    pub auth_mode: WifiAuthMode,
+}
+
+impl WifiConfig {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.is_empty() {
+            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
+        }
+
+        let ssid_len = bytes[0] as usize;
+        let ssid_start = 1;
+        let ssid_end = ssid_start + ssid_len;
+
+        if bytes.len() < ssid_end {
+            return Err(ProtocolError::InsufficientData {
+                needed: ssid_end,
+                got: bytes.len(),
+            });
+        }
+
+        let ssid = String::from_utf8_lossy(&bytes[ssid_start..ssid_end]).into_owned();
+
+        let pass_len_pos = ssid_end;
+        if bytes.len() < pass_len_pos + 1 {
+            return Err(ProtocolError::InsufficientData {
+                needed: pass_len_pos + 1,
+                got: bytes.len(),
+            });
+        }
+
+        let pass_len = bytes[pass_len_pos] as usize;
+        let pass_start = pass_len_pos + 1;
+        let pass_end = pass_start + pass_len;
+
+        if bytes.len() < pass_end {
+            return Err(ProtocolError::InsufficientData {
+                needed: pass_end,
+                got: bytes.len(),
+            });
+        }
+
+        let password = String::from_utf8_lossy(&bytes[pass_start..pass_end]).into_owned();
+
+        let auth_pos = pass_end;
+        if bytes.len() < auth_pos + 1 {
+            return Err(ProtocolError::InsufficientData {
+                needed: auth_pos + 1,
+                got: bytes.len(),
+            });
+        }
+
+        let auth_mode = WifiAuthMode::from_byte(bytes[auth_pos])?;
+
+        Ok(WifiConfig {
+            ssid,
+            password,
+            auth_mode,
+        })
+    }
+}
+
+/// WiFi connection state.
+///
+/// Wire encoding:
+/// - Disconnected: 0x00
+/// - Connecting:   0x01
+/// - Connected:    0x02
+/// - Failed:       0x03
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WifiState {
+    Disconnected = 0x00,
+    Connecting = 0x01,
+    Connected = 0x02,
+    Failed = 0x03,
+}
+
+impl From<WifiState> for u8 {
+    fn from(state: WifiState) -> u8 {
+        state as u8
+    }
+}
+
+/// WiFi status sent to the app via BLE notification.
+///
+/// Wire encoding: `[state: u8, msg_len: u8, msg_bytes...]`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WifiStatus {
+    pub state: WifiState,
+    pub message: String,
+}
+
+impl WifiStatus {
+    pub fn disconnected() -> Self {
+        Self {
+            state: WifiState::Disconnected,
+            message: String::new(),
+        }
+    }
+
+    pub fn connecting() -> Self {
+        Self {
+            state: WifiState::Connecting,
+            message: String::new(),
+        }
+    }
+
+    pub fn connected() -> Self {
+        Self {
+            state: WifiState::Connected,
+            message: String::new(),
+        }
+    }
+
+    pub fn failed(msg: impl Into<String>) -> Self {
+        Self {
+            state: WifiState::Failed,
+            message: msg.into(),
+        }
+    }
+
+    /// Panics if message exceeds 255 bytes.
+    pub fn encode(&self) -> Vec<u8> {
+        let msg_bytes = self.message.as_bytes();
+        let msg_len = u8::try_from(msg_bytes.len()).expect("WifiStatus message exceeds 255 bytes");
+
+        let mut out = Vec::with_capacity(2 + msg_bytes.len());
+        out.push(u8::from(self.state));
         out.push(msg_len);
         out.extend_from_slice(msg_bytes);
         out
@@ -498,5 +673,109 @@ mod tests {
             uuids::LICHESS_STATUS,
             "3d6343a2-3003-44ea-8fc2-3568d7216866"
         );
+    }
+
+    // WiFi config parsing tests
+    #[test]
+    fn parse_wifi_config_wpa2() {
+        // [ssid_len=5][ssid="MyNet"][pass_len=7][pass="pass123"][auth=0x01]
+        let bytes = [
+            5u8, b'M', b'y', b'N', b'e', b't', 7, b'p', b'a', b's', b's', b'1', b'2', b'3', 0x01,
+        ];
+        let config = WifiConfig::from_bytes(&bytes).expect("should parse WPA2 config");
+        assert_eq!(config.ssid, "MyNet");
+        assert_eq!(config.password, "pass123");
+        assert_eq!(config.auth_mode, WifiAuthMode::Wpa2);
+    }
+
+    #[test]
+    fn parse_wifi_config_open() {
+        // [ssid_len=4][ssid="Open"][pass_len=0][auth=0x00]
+        let bytes = [4u8, b'O', b'p', b'e', b'n', 0, 0x00];
+        let config = WifiConfig::from_bytes(&bytes).expect("should parse Open config");
+        assert_eq!(config.ssid, "Open");
+        assert_eq!(config.password, "");
+        assert_eq!(config.auth_mode, WifiAuthMode::Open);
+    }
+
+    #[test]
+    fn parse_wifi_config_wpa3() {
+        // [ssid_len=7][ssid="Network"][pass_len=8][pass="password"][auth=0x02]
+        let bytes = [
+            7u8, b'N', b'e', b't', b'w', b'o', b'r', b'k', 8, b'p', b'a', b's', b's', b'w', b'o',
+            b'r', b'd', 0x02,
+        ];
+        let config = WifiConfig::from_bytes(&bytes).expect("should parse WPA3 config");
+        assert_eq!(config.ssid, "Network");
+        assert_eq!(config.password, "password");
+        assert_eq!(config.auth_mode, WifiAuthMode::Wpa3);
+    }
+
+    #[test]
+    fn parse_wifi_config_empty_bytes() {
+        let bytes = b"";
+        let result = WifiConfig::from_bytes(bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
+        ));
+    }
+
+    #[test]
+    fn parse_wifi_config_truncated_ssid() {
+        // [ssid_len=5][ssid="abc"] - claims 5 bytes but only has 3
+        let bytes = [5u8, b'a', b'b', b'c'];
+        let result = WifiConfig::from_bytes(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 6, got: 4 })
+        ));
+    }
+
+    #[test]
+    fn parse_wifi_config_missing_auth() {
+        // [ssid_len=3][ssid="Net"][pass_len=4][pass="pass"] - missing auth byte
+        let bytes = [3u8, b'N', b'e', b't', 4, b'p', b'a', b's', b's'];
+        let result = WifiConfig::from_bytes(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: _, got: _ })
+        ));
+    }
+
+    #[test]
+    fn parse_wifi_config_unknown_auth() {
+        // [ssid_len=3][ssid="Net"][pass_len=4][pass="pass"][auth=0x03]
+        let bytes = [3u8, b'N', b'e', b't', 4, b'p', b'a', b's', b's', 0x03];
+        let result = WifiConfig::from_bytes(&bytes);
+        assert!(matches!(result, Err(ProtocolError::UnknownAuthMode(0x03))));
+    }
+
+    // WiFi status encoding tests
+    #[test]
+    fn encode_wifi_disconnected() {
+        let status = WifiStatus::disconnected();
+        assert_eq!(status.encode(), vec![0x00, 0x00]);
+    }
+
+    #[test]
+    fn encode_wifi_connecting() {
+        let status = WifiStatus::connecting();
+        assert_eq!(status.encode(), vec![0x01, 0x00]);
+    }
+
+    #[test]
+    fn encode_wifi_connected() {
+        let status = WifiStatus::connected();
+        assert_eq!(status.encode(), vec![0x02, 0x00]);
+    }
+
+    #[test]
+    fn encode_wifi_failed() {
+        let status = WifiStatus::failed("timeout");
+        let encoded = status.encode();
+        assert_eq!(encoded[0], 0x03);
+        assert_eq!(encoded[1], 7); // "timeout" is 7 bytes
+        assert_eq!(&encoded[2..], b"timeout");
     }
 }
