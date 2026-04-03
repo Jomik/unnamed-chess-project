@@ -7,7 +7,9 @@ use esp32_nimble::{
 };
 use shakmaty::Color;
 
-use crate::ble_protocol::{BleCommand, CommandResult, GameState, PlayerConfig, UNSET_BYTE, uuids};
+use crate::ble_protocol::{
+    BleCommand, CommandResult, CommandSource, GameState, PlayerConfig, UNSET_BYTE, uuids,
+};
 
 use alloc::sync::Arc;
 extern crate alloc;
@@ -44,7 +46,7 @@ impl CommandResultHandle {
 
     /// Called on every BLE reconnect per protocol spec.
     fn reset(&self) {
-        self.notify(&CommandResult::success());
+        self.notify(&CommandResult::success(CommandSource::StartGame));
     }
 }
 
@@ -63,7 +65,6 @@ struct GameHandles {
     command_result: CommandResultHandle,
 }
 
-/// Produced by [`start_ble`]; used exclusively from the main game loop.
 pub struct BleCommands {
     rx: mpsc::Receiver<BleCommand>,
 }
@@ -80,7 +81,6 @@ impl BleCommands {
     }
 }
 
-/// Produced by [`start_ble`]; used exclusively from the main game loop.
 pub struct BleNotifier {
     game_state: GameStateHandle,
     command_result: CommandResultHandle,
@@ -280,9 +280,7 @@ fn register_game_service(server: &mut BLEServer, tx: &mpsc::SyncSender<BleComman
         uuid128!(uuids::GAME_STATE),
         NimbleProperties::READ | NimbleProperties::NOTIFY,
     );
-    game_state_chr
-        .lock()
-        .set_value(&GameState::not_started().encode());
+    game_state_chr.lock().set_value(&GameState::idle().encode());
 
     let command_result_chr = svc.create_characteristic(
         uuid128!(uuids::COMMAND_RESULT),
@@ -290,7 +288,7 @@ fn register_game_service(server: &mut BLEServer, tx: &mpsc::SyncSender<BleComman
     );
     command_result_chr
         .lock()
-        .set_value(&CommandResult::success().encode());
+        .set_value(&CommandResult::success(CommandSource::StartGame).encode());
 
     GameHandles {
         white_player,

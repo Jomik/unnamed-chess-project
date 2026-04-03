@@ -71,12 +71,13 @@ impl PlayerConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum GameStatus {
-    NotStarted = 0x00,
-    InProgress = 0x01,
-    Checkmate = 0x02,
-    Stalemate = 0x03,
-    Resignation = 0x04,
-    Draw = 0x05,
+    Idle = 0x00,
+    AwaitingPieces = 0x01,
+    InProgress = 0x02,
+    Checkmate = 0x03,
+    Stalemate = 0x04,
+    Resignation = 0x05,
+    Draw = 0x06,
 }
 
 impl From<GameStatus> for u8 {
@@ -97,9 +98,9 @@ pub struct GameState {
 }
 
 impl GameState {
-    pub fn not_started() -> Self {
+    pub fn idle() -> Self {
         Self {
-            status: GameStatus::NotStarted,
+            status: GameStatus::Idle,
             turn: Color::White,
         }
     }
@@ -152,28 +153,39 @@ fn parse_color(byte: u8) -> Result<Color, ProtocolError> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CommandSource {
+    StartGame = 0x00,
+    MatchControl = 0x01,
+}
+
 /// The result of processing a BLE command (Start Game or Match Control).
 ///
-/// Wire encoding: `[ok: u8, msg_len: u8, msg_bytes...]`
+/// Wire encoding: `[ok: u8, command: u8, msg_len: u8, msg_bytes...]`
 /// - `ok` is `0x00` for success, `0x01` for error.
+/// - `command` identifies which command produced this result.
 /// - On success, `msg_len` is `0x00` and no message bytes follow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandResult {
     pub ok: bool,
+    pub source: CommandSource,
     pub message: String,
 }
 
 impl CommandResult {
-    pub fn success() -> Self {
+    pub fn success(source: CommandSource) -> Self {
         Self {
             ok: true,
+            source,
             message: String::new(),
         }
     }
 
-    pub fn error(msg: impl Into<String>) -> Self {
+    pub fn error(source: CommandSource, msg: impl Into<String>) -> Self {
         Self {
             ok: false,
+            source,
             message: msg.into(),
         }
     }
@@ -185,8 +197,9 @@ impl CommandResult {
             u8::try_from(msg_bytes.len()).expect("CommandResult message exceeds 255 bytes");
         let ok_byte: u8 = if self.ok { 0x00 } else { 0x01 };
 
-        let mut out = Vec::with_capacity(2 + msg_bytes.len());
+        let mut out = Vec::with_capacity(3 + msg_bytes.len());
         out.push(ok_byte);
+        out.push(self.source as u8);
         out.push(msg_len);
         out.extend_from_slice(msg_bytes);
         out
@@ -220,8 +233,6 @@ pub mod uuids {
 mod tests {
     use super::*;
 
-    // ── PlayerConfig::encode ──────────────────────────────────────────────────
-
     #[test]
     fn encode_human_player() {
         assert_eq!(PlayerConfig::Human.encode(), vec![0x00]);
@@ -254,8 +265,6 @@ mod tests {
             assert_eq!(&decoded, config);
         }
     }
-
-    // ── PlayerConfig::from_bytes ──────────────────────────────────────────────
 
     #[test]
     fn parse_human_player() {
@@ -335,14 +344,12 @@ mod tests {
         assert!(matches!(result, Err(ProtocolError::LevelOutOfRange(9))));
     }
 
-    // ── GameState::encode ─────────────────────────────────────────────────────
-
     #[test]
-    fn encode_not_started_state() {
-        let state = GameState::not_started();
+    fn encode_idle_state() {
+        let state = GameState::idle();
         let encoded = state.encode();
 
-        assert_eq!(encoded, vec![0x00, 0x00]); // NotStarted, White
+        assert_eq!(encoded, vec![0x00, 0x00]);
         assert_eq!(encoded.len(), 2);
     }
 
@@ -354,7 +361,7 @@ mod tests {
         };
         let encoded = state.encode();
 
-        assert_eq!(encoded[0], 0x01); // InProgress
+        assert_eq!(encoded[0], 0x02); // InProgress
         assert_eq!(encoded[1], 0x01); // Black
         assert_eq!(encoded.len(), 2);
     }
@@ -367,10 +374,8 @@ mod tests {
             turn: Color::White,
         };
         let encoded = state.encode();
-        assert_eq!(encoded, vec![0x02, 0x00]);
+        assert_eq!(encoded, vec![0x03, 0x00]);
     }
-
-    // ── BleCommand::parse_match_control ──────────────────────────────────────
 
     #[test]
     fn parse_resign_white() {
@@ -424,42 +429,50 @@ mod tests {
         ));
     }
 
-    // ── CommandResult::encode ─────────────────────────────────────────────────
-
     #[test]
-    fn encode_success_result() {
-        let result = CommandResult::success();
-        assert_eq!(result.encode(), vec![0x00, 0x00]);
+    fn encode_success_start_game() {
+        let result = CommandResult::success(CommandSource::StartGame);
+        assert_eq!(result.encode(), vec![0x00, 0x00, 0x00]);
     }
 
     #[test]
-    fn encode_error_result() {
-        let result = CommandResult::error("oops");
+    fn encode_success_match_control() {
+        let result = CommandResult::success(CommandSource::MatchControl);
+        assert_eq!(result.encode(), vec![0x00, 0x01, 0x00]);
+    }
+
+    #[test]
+    fn encode_error_start_game() {
+        let result = CommandResult::error(CommandSource::StartGame, "oops");
         let encoded = result.encode();
         assert_eq!(encoded[0], 0x01); // error
-        assert_eq!(encoded[1], 4); // "oops" is 4 bytes
-        assert_eq!(&encoded[2..], b"oops");
+        assert_eq!(encoded[1], 0x00); // StartGame
+        assert_eq!(encoded[2], 4); // "oops" is 4 bytes
+        assert_eq!(&encoded[3..], b"oops");
     }
 
     #[test]
-    fn encode_error_result_byte_layout() {
-        let result = CommandResult::error("hi");
-        assert_eq!(result.encode(), vec![0x01, 0x02, b'h', b'i']);
+    fn encode_error_match_control_byte_layout() {
+        let result = CommandResult::error(CommandSource::MatchControl, "hi");
+        assert_eq!(result.encode(), vec![0x01, 0x01, 0x02, b'h', b'i']);
     }
 
-    // ── GameStatus u8 conversions ─────────────────────────────────────────────
+    #[test]
+    fn encode_error_start_game_byte_layout() {
+        let result = CommandResult::error(CommandSource::StartGame, "hi");
+        assert_eq!(result.encode(), vec![0x01, 0x00, 0x02, b'h', b'i']);
+    }
 
     #[test]
     fn game_status_values() {
-        assert_eq!(u8::from(GameStatus::NotStarted), 0x00);
-        assert_eq!(u8::from(GameStatus::InProgress), 0x01);
-        assert_eq!(u8::from(GameStatus::Checkmate), 0x02);
-        assert_eq!(u8::from(GameStatus::Stalemate), 0x03);
-        assert_eq!(u8::from(GameStatus::Resignation), 0x04);
-        assert_eq!(u8::from(GameStatus::Draw), 0x05);
+        assert_eq!(u8::from(GameStatus::Idle), 0x00);
+        assert_eq!(u8::from(GameStatus::AwaitingPieces), 0x01);
+        assert_eq!(u8::from(GameStatus::InProgress), 0x02);
+        assert_eq!(u8::from(GameStatus::Checkmate), 0x03);
+        assert_eq!(u8::from(GameStatus::Stalemate), 0x04);
+        assert_eq!(u8::from(GameStatus::Resignation), 0x05);
+        assert_eq!(u8::from(GameStatus::Draw), 0x06);
     }
-
-    // ── UUID constants ────────────────────────────────────────────────────────
 
     #[test]
     fn uuid_registry_has_correct_values() {
