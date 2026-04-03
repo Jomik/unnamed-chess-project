@@ -274,7 +274,7 @@ impl From<WifiAuthMode> for u8 {
 
 /// WiFi configuration sent via BLE.
 ///
-/// Wire encoding: `[ssid_len: u8, ssid_bytes..., pass_len: u8, pass_bytes..., auth_mode: u8]`
+/// Wire encoding: `[auth_mode: u8, ssid_len: u8, ssid_bytes..., pass_len: u8, pass_bytes...]`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WifiConfig {
     pub ssid: String,
@@ -288,8 +288,18 @@ impl WifiConfig {
             return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
         }
 
-        let ssid_len = bytes[0] as usize;
-        let ssid_start = 1;
+        let auth_mode = WifiAuthMode::from_byte(bytes[0])?;
+
+        let ssid_len_pos = 1;
+        if bytes.len() < ssid_len_pos + 1 {
+            return Err(ProtocolError::InsufficientData {
+                needed: ssid_len_pos + 1,
+                got: bytes.len(),
+            });
+        }
+
+        let ssid_len = bytes[ssid_len_pos] as usize;
+        let ssid_start = ssid_len_pos + 1;
         let ssid_end = ssid_start + ssid_len;
 
         if bytes.len() < ssid_end {
@@ -321,16 +331,6 @@ impl WifiConfig {
         }
 
         let password = String::from_utf8_lossy(&bytes[pass_start..pass_end]).into_owned();
-
-        let auth_pos = pass_end;
-        if bytes.len() < auth_pos + 1 {
-            return Err(ProtocolError::InsufficientData {
-                needed: auth_pos + 1,
-                got: bytes.len(),
-            });
-        }
-
-        let auth_mode = WifiAuthMode::from_byte(bytes[auth_pos])?;
 
         Ok(WifiConfig {
             ssid,
@@ -784,9 +784,9 @@ mod tests {
     // WiFi config parsing tests
     #[test]
     fn parse_wifi_config_wpa2() {
-        // [ssid_len=5][ssid="MyNet"][pass_len=7][pass="pass123"][auth=0x01]
+        // [auth=0x01][ssid_len=5][ssid="MyNet"][pass_len=7][pass="pass123"]
         let bytes = [
-            5u8, b'M', b'y', b'N', b'e', b't', 7, b'p', b'a', b's', b's', b'1', b'2', b'3', 0x01,
+            0x01u8, 5, b'M', b'y', b'N', b'e', b't', 7, b'p', b'a', b's', b's', b'1', b'2', b'3',
         ];
         let config = WifiConfig::from_bytes(&bytes).expect("should parse WPA2 config");
         assert_eq!(config.ssid, "MyNet");
@@ -796,8 +796,8 @@ mod tests {
 
     #[test]
     fn parse_wifi_config_open() {
-        // [ssid_len=4][ssid="Open"][pass_len=0][auth=0x00]
-        let bytes = [4u8, b'O', b'p', b'e', b'n', 0, 0x00];
+        // [auth=0x00][ssid_len=4][ssid="Open"][pass_len=0]
+        let bytes = [0x00u8, 4, b'O', b'p', b'e', b'n', 0];
         let config = WifiConfig::from_bytes(&bytes).expect("should parse Open config");
         assert_eq!(config.ssid, "Open");
         assert_eq!(config.password, "");
@@ -806,10 +806,10 @@ mod tests {
 
     #[test]
     fn parse_wifi_config_wpa3() {
-        // [ssid_len=7][ssid="Network"][pass_len=8][pass="password"][auth=0x02]
+        // [auth=0x02][ssid_len=7][ssid="Network"][pass_len=8][pass="password"]
         let bytes = [
-            7u8, b'N', b'e', b't', b'w', b'o', b'r', b'k', 8, b'p', b'a', b's', b's', b'w', b'o',
-            b'r', b'd', 0x02,
+            0x02u8, 7, b'N', b'e', b't', b'w', b'o', b'r', b'k', 8, b'p', b'a', b's', b's', b'w',
+            b'o', b'r', b'd',
         ];
         let config = WifiConfig::from_bytes(&bytes).expect("should parse WPA3 config");
         assert_eq!(config.ssid, "Network");
@@ -829,30 +829,30 @@ mod tests {
 
     #[test]
     fn parse_wifi_config_truncated_ssid() {
-        // [ssid_len=5][ssid="abc"] - claims 5 bytes but only has 3
-        let bytes = [5u8, b'a', b'b', b'c'];
+        // [auth=0x01][ssid_len=5][ssid="abc"] - claims 5 bytes but only has 3
+        let bytes = [0x01u8, 5, b'a', b'b', b'c'];
         let result = WifiConfig::from_bytes(&bytes);
         assert!(matches!(
             result,
-            Err(ProtocolError::InsufficientData { needed: 6, got: 4 })
+            Err(ProtocolError::InsufficientData { needed: 7, got: 5 })
         ));
     }
 
     #[test]
-    fn parse_wifi_config_missing_auth() {
-        // [ssid_len=3][ssid="Net"][pass_len=4][pass="pass"] - missing auth byte
-        let bytes = [3u8, b'N', b'e', b't', 4, b'p', b'a', b's', b's'];
+    fn parse_wifi_config_missing_pass_len() {
+        // [auth=0x01][ssid_len=3][ssid="Net"] - missing pass_len byte
+        let bytes = [0x01u8, 3, b'N', b'e', b't'];
         let result = WifiConfig::from_bytes(&bytes);
         assert!(matches!(
             result,
-            Err(ProtocolError::InsufficientData { needed: _, got: _ })
+            Err(ProtocolError::InsufficientData { needed: 6, got: 5 })
         ));
     }
 
     #[test]
     fn parse_wifi_config_unknown_auth() {
-        // [ssid_len=3][ssid="Net"][pass_len=4][pass="pass"][auth=0x03]
-        let bytes = [3u8, b'N', b'e', b't', 4, b'p', b'a', b's', b's', 0x03];
+        // [auth=0x03][ssid_len=3][ssid="Net"][pass_len=4][pass="pass"]
+        let bytes = [0x03u8, 3, b'N', b'e', b't', 4, b'p', b'a', b's', b's'];
         let result = WifiConfig::from_bytes(&bytes);
         assert!(matches!(result, Err(ProtocolError::UnknownAuthMode(0x03))));
     }

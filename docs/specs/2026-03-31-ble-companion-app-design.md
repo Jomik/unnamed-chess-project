@@ -152,7 +152,7 @@ Board notifies Game State     → [0x02] [0x00]           (in progress, white's 
 
 **Starting a Lichess AI game:**
 ```
-App writes WiFi Config   → [SSID...] [password...] [0x01]
+App writes WiFi Config   → [0x01] [SSID...] [password...]
 App watches WiFi Status  → ... → connected
 App writes Lichess Token → [token...]
 App watches Lichess Status → ... → connected
@@ -175,7 +175,7 @@ Manages WiFi connectivity (UUID prefix 2xxx). The app writes credentials; the bo
 
 | Characteristic   | Properties   | Payload                                                       |
 | ----------------- | ------------ | ------------------------------------------------------------- |
-| WiFi Config       | Write        | SSID (length-prefixed string), password (length-prefixed string), auth mode (u8) |
+| WiFi Config       | Write        | Auth mode (u8), SSID (length-prefixed string), password (length-prefixed string) |
 | WiFi Status       | Read, Notify | State (u8), error message (length-prefixed string)            |
 
 **Auth mode values:**
