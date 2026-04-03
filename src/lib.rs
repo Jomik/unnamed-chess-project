@@ -4,7 +4,6 @@ pub mod ble_protocol;
 pub mod feedback;
 pub mod lichess;
 pub mod player;
-pub mod provisioning;
 pub mod session;
 pub mod setup;
 

@@ -43,6 +43,64 @@ pub struct SensorCalibration {
     pub threshold_mv: u16,
 }
 
+/// Error type for NVS calibration load/save operations.
+#[derive(Debug, thiserror::Error)]
+#[error("NVS error: {0}")]
+pub struct CalibrationError(#[from] pub esp_idf_svc::sys::EspError);
+
+const CAL_NAMESPACE: &str = "cal";
+const KEY_CAL_BASELINE: &str = "cal_baseline";
+const KEY_CAL_THRESHOLD: &str = "cal_threshold";
+
+#[cfg(target_os = "espidf")]
+impl SensorCalibration {
+    /// Load calibration from the dedicated `cal` NVS partition.
+    ///
+    /// Returns `Ok(None)` if no calibration has been saved yet (first boot or
+    /// after `just erase-cal`). Returns `Err` on NVS read failures.
+    pub fn load(
+        partition: &esp_idf_svc::nvs::EspNvsPartition<esp_idf_svc::nvs::NvsCustom>,
+    ) -> Result<Option<Self>, CalibrationError> {
+        use esp_idf_svc::nvs::EspNvs;
+
+        let nvs = match EspNvs::new(partition.clone(), CAL_NAMESPACE, false) {
+            Ok(nvs) => nvs,
+            Err(e) if e.code() == esp_idf_svc::sys::ESP_ERR_NVS_NOT_FOUND => return Ok(None),
+            Err(e) => return Err(CalibrationError(e)),
+        };
+
+        let baseline_mv = match nvs.get_u16(KEY_CAL_BASELINE).map_err(CalibrationError)? {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+
+        let threshold_mv = nvs
+            .get_u16(KEY_CAL_THRESHOLD)
+            .map_err(CalibrationError)?
+            .unwrap_or(SensorConfig::default().threshold_mv);
+
+        Ok(Some(SensorCalibration {
+            baseline_mv,
+            threshold_mv,
+        }))
+    }
+
+    /// Save calibration to the dedicated `cal` NVS partition.
+    pub fn save(
+        &self,
+        partition: &esp_idf_svc::nvs::EspNvsPartition<esp_idf_svc::nvs::NvsCustom>,
+    ) -> Result<(), CalibrationError> {
+        use esp_idf_svc::nvs::EspNvs;
+
+        let nvs = EspNvs::new(partition.clone(), CAL_NAMESPACE, true).map_err(CalibrationError)?;
+        nvs.set_u16(KEY_CAL_BASELINE, self.baseline_mv)
+            .map_err(CalibrationError)?;
+        nvs.set_u16(KEY_CAL_THRESHOLD, self.threshold_mv)
+            .map_err(CalibrationError)?;
+        Ok(())
+    }
+}
+
 /// Display configuration for LED colors.
 #[derive(Debug, Clone)]
 pub struct DisplayConfig {
