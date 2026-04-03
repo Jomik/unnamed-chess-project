@@ -1,0 +1,5 @@
+ChessBoard/ChessBoard.xcodeproj/
+ChessBoard/Local.xcconfig
+DerivedData/
+.build/
+ChessBoard/buildServer.json

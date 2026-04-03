@@ -58,6 +58,21 @@ erase-nvs:
 erase-cal:
     cargo +esp espflash erase-parts --partition-table partitions.csv cal
 
+# Build companion iOS app (simulator)
+companion-build:
+    cd companion/ChessBoard && xcodegen generate
+    cd companion/ChessBoard && xcodebuild build -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'generic/platform=iOS Simulator' -quiet
+
+# Run companion iOS app tests
+companion-test:
+    cd companion/ChessBoard && xcodegen generate
+    cd companion/ChessBoard && xcodebuild test -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.0' -quiet
+
+# Open companion iOS app in Xcode (for device deployment)
+companion-open:
+    cd companion/ChessBoard && xcodegen generate
+    open companion/ChessBoard/ChessBoard.xcodeproj
+
 # Install ESP Xtensa toolchain (run once after installing rustup)
 setup-esp:
     espup install

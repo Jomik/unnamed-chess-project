@@ -1,6 +1,7 @@
 /.vscode
 /.embuild
 /target
+/components
 /*.zip
 /rust-analyzer.toml
 /.env

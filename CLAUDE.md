@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ESP32-S3 smart chess board firmware in Rust. Hall-effect sensors detect per-color piece positions; LEDs provide move feedback. Uses `shakmaty` for chess logic. Supports an optional computer opponent (embedded heuristic engine or Lichess AI via HTTP).
+ESP32-S3 smart chess board firmware in Rust, plus an iOS companion app (SwiftUI + CoreBluetooth). Hall-effect sensors detect per-color piece positions; LEDs provide move feedback. Uses `shakmaty` for chess logic. The companion app connects via BLE to configure and start games. Supports human-vs-human and human-vs-embedded-engine modes (Phase 1); Lichess AI via HTTP is Phase 2.
 
 ## Build and Test Commands
 
@@ -18,6 +18,20 @@ just build-diag        # Build diagnostics binary
 just flash             # Flash to ESP32 and monitor serial
 just flash-diag        # Flash diagnostics binary and monitor serial
 ```
+
+### iOS Companion App
+
+The companion app is at `companion/ChessBoard/`. It uses XcodeGen to generate the Xcode project from `project.yml`.
+
+```bash
+just companion-build   # Generate .xcodeproj + build for simulator
+just companion-test    # Generate .xcodeproj + run tests
+just companion-open    # Generate .xcodeproj + open in Xcode
+```
+
+Requires Xcode 15+ and XcodeGen (`brew install xcodegen`). BLE does not work in the simulator — use a physical device for end-to-end testing.
+
+For physical device deployment, copy `companion/ChessBoard/Local.xcconfig.template` to `Local.xcconfig` and set your `DEVELOPMENT_TEAM` ID.
 
 ### Linting
 
@@ -116,7 +130,7 @@ Per-board sensor calibration (baseline voltage, detection threshold) is stored i
 
 The production firmware loads calibration from NVS on boot, falling back to `SensorConfig::default()` if uncalibrated.
 
-Calibration data lives in a separate `cal` NVS partition from the main `nvs` partition. This means `just erase-nvs` (for WiFi reprovisioning) does not wipe calibration. Use `just erase-cal` to force recalibration.
+Calibration data lives in a separate `cal` NVS partition from the main `nvs` partition. This means `just erase-nvs` does not wipe calibration. Use `just erase-cal` to force recalibration.
 
 See `docs/specs/2026-03-28-sensor-diagnostics-design.md` for the full design.
 

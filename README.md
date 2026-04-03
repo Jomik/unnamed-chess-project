@@ -47,19 +47,47 @@ target selection and toolchain flags automatically.
 just build       # Build firmware
 just flash       # Flash to device and monitor serial output
 just flash-diag  # Flash diagnostics/calibration binary
-just erase-nvs   # Erase WiFi/Lichess config (triggers reprovisioning)
+just erase-nvs   # Erase NVS partition (triggers reprovisioning)
 just erase-cal   # Erase sensor calibration (triggers recalibration)
 ```
 
 Run `just` with no arguments to see all available tasks.
 
+## Companion App
+
+The iOS companion app connects to the board over BLE to configure players and start games. It lives in `companion/ChessBoard/`.
+
+### Prerequisites
+
+Requires Xcode 15+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen):
+
+```bash
+brew install xcodegen
+```
+
+For physical device deployment, copy `companion/ChessBoard/Local.xcconfig.template` to `Local.xcconfig` and set your `DEVELOPMENT_TEAM` ID. BLE does not work in the simulator — use a physical device for end-to-end testing.
+
+### Building
+
+```bash
+just companion-build   # Generate .xcodeproj + build for simulator
+just companion-test    # Generate .xcodeproj + run tests
+just companion-open    # Generate .xcodeproj + open in Xcode
+```
+
+### Neovim (optional)
+
+SourceKit-LSP needs [xcode-build-server](https://github.com/SolaWing/xcode-build-server) to resolve types in XcodeGen projects:
+
+```bash
+brew install xcode-build-server
+just companion-build
+cd companion/ChessBoard && xcode-build-server config -project ChessBoard.xcodeproj -scheme ChessBoard
+```
+
 ## Board Setup
 
-On first boot (or after `just erase-nvs`), the board enters provisioning mode:
-
-1. Connect to the **ChessBoard** WiFi network from your phone or computer
-2. Navigate to `192.168.71.1`
-3. Enter your WiFi credentials and optionally configure Lichess
+On first boot, the board advertises over BLE as **ChessBoard**. Use the companion app to connect, configure players, and start a game.
 
 ### Sensor Calibration
 
@@ -73,13 +101,9 @@ The diagnostics binary walks through three phases: assembly check (LED sweep →
 
 Without calibration, the firmware falls back to conservative defaults that may not work well for all boards.
 
-### Lichess Integration (optional)
+### Lichess Integration (Phase 2)
 
-To play against the Lichess AI, create a personal access token with the required scopes:
-
-[Create token on lichess.org](https://lichess.org/account/oauth/token/create?scopes[]=board:play&scopes[]=challenge:write&description=Chess+Board)
-
-Enter this token in the provisioning form. Without a token, the board uses a built-in heuristic engine.
+Lichess AI integration is planned but not yet available. The board currently uses a built-in heuristic engine for computer play.
 
 ## Development
 

@@ -6,7 +6,7 @@ fn main() {
     use esp_idf_svc::nvs::{EspNvsPartition, NvsCustom};
     use shakmaty::Color;
     use unnamed_chess_project::ble_protocol::{
-        BleCommand, CommandResult, GameState, PlayerConfig, UNSET_BYTE,
+        BleCommand, CommandResult, CommandSource, GameState, GameStatus, PlayerConfig, UNSET_BYTE,
     };
     use unnamed_chess_project::esp32::config::{LedPalette, SensorCalibration, SensorConfig};
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, start_ble};
@@ -73,7 +73,6 @@ fn main() {
     log::info!("Entering BLE command loop");
 
     loop {
-        // Drain BLE commands
         while let Some(cmd) = commands.try_recv() {
             match cmd {
                 BleCommand::SetWhitePlayer(config) => {
@@ -92,6 +91,7 @@ fn main() {
                     if session.is_some() {
                         log::warn!("StartGame received while game is active");
                         notifier.notify_command_result(&CommandResult::error(
+                            CommandSource::StartGame,
                             "game already in progress",
                         ));
                         continue;
@@ -100,24 +100,36 @@ fn main() {
                     let (Some(w_config), Some(b_config)) = (&white_config, &black_config) else {
                         log::warn!("StartGame received but players not configured");
                         notifier.notify_command_result(&CommandResult::error(
+                            CommandSource::StartGame,
                             "both players must be configured",
                         ));
                         continue;
                     };
 
-                    // Reject LichessAi in Phase 1
                     if matches!(w_config, PlayerConfig::LichessAi { .. }) {
                         notifier.notify_command_result(&CommandResult::error(
+                            CommandSource::StartGame,
                             "Lichess AI not supported",
                         ));
                         continue;
                     }
                     if matches!(b_config, PlayerConfig::LichessAi { .. }) {
                         notifier.notify_command_result(&CommandResult::error(
+                            CommandSource::StartGame,
                             "Lichess AI not supported",
                         ));
                         continue;
                     }
+
+                    // Acknowledge the command and notify AwaitingPieces before
+                    // entering the blocking setup loop.
+                    notifier
+                        .notify_command_result(&CommandResult::success(CommandSource::StartGame));
+                    let awaiting_state = GameState {
+                        status: GameStatus::AwaitingPieces,
+                        turn: Color::White,
+                    };
+                    notifier.notify_game_state(&awaiting_state);
 
                     log::info!("Waiting for starting position...");
                     let initial_positions =
@@ -125,9 +137,14 @@ fn main() {
                             Ok(p) => p,
                             Err(e) => {
                                 log::error!("Initial sensor read failed: {e}");
+                                // Reset to Idle since setup failed.
+                                let idle_state = GameState::idle();
                                 notifier.notify_command_result(&CommandResult::error(
+                                    CommandSource::StartGame,
                                     "sensor read failed",
                                 ));
+                                notifier.notify_game_state(&idle_state);
+                                prev_game_state = Some(idle_state);
                                 continue;
                             }
                         };
@@ -138,7 +155,6 @@ fn main() {
 
                     let new_session = GameSession::new(white_player, black_player);
                     let state = new_session.game_state();
-                    notifier.notify_command_result(&CommandResult::success());
                     notifier.notify_game_state(&state);
                     prev_game_state = Some(state);
 
@@ -152,13 +168,17 @@ fn main() {
                         log::info!("{color:?} resigns");
                         s.resign(color);
                         let state = s.game_state();
-                        notifier.notify_command_result(&CommandResult::success());
+                        notifier.notify_command_result(&CommandResult::success(
+                            CommandSource::MatchControl,
+                        ));
                         notifier.notify_game_state(&state);
                         prev_game_state = Some(state);
                     } else {
                         log::warn!("Resign received but no game is active");
-                        notifier
-                            .notify_command_result(&CommandResult::error("no game in progress"));
+                        notifier.notify_command_result(&CommandResult::error(
+                            CommandSource::MatchControl,
+                            "no game in progress",
+                        ));
                     }
                 }
             }
@@ -213,7 +233,6 @@ fn main() {
     }
 }
 
-/// Returns positions from a fresh sensor read after the starting position is confirmed.
 #[cfg(target_os = "espidf")]
 fn wait_for_starting_position<S, D>(
     sensor: &mut S,

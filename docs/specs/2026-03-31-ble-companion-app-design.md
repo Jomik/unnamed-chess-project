@@ -87,7 +87,7 @@ Game lifecycle and state. The core of the protocol (UUID prefix 1xxx).
 | Start Game         | Write        | Empty (trigger)                                              |
 | Match Control      | Write        | Action (u8: 0x00=resign), player (u8: 0x00=white, 0x01=black) |
 | Game State         | Read, Notify | Status (u8), turn (u8: 0x00=white, 0x01=black). Both fields are always present regardless of game status. The `turn` field reflects the side to move — it is not reinterpreted based on game outcome. In checkmate/stalemate this is the checkmated/stalemated side; in resignation/draw it is whoever's turn it was when the game ended. |
-| Command Result     | Read, Notify | Status code (u8: 0x00=ok, 0x01=error), error message (length-prefixed string, empty if ok) |
+| Command Result     | Read, Notify | Status code (u8: 0x00=ok, 0x01=error), command source (u8: 0x00=StartGame, 0x01=MatchControl), error message (length-prefixed string, empty if ok) |
 
 **Match Control action values:**
 
@@ -95,18 +95,25 @@ Game lifecycle and state. The core of the protocol (UUID prefix 1xxx).
 | ----- | ---------------- |
 | 0x00  | Resign           |
 
-**Reconnection behavior:** On BLE reconnect, the app reads Game State to recover current state. The firmware resets Command Result to `[0x00, 0x00]` (ok, zero-length message) on reconnect — stale results from before disconnection are discarded.
+**Command source values:**
+
+| Value | Source       |
+| ----- | ------------ |
+| 0x00  | Start Game   |
+| 0x01  | Match Control |
+
+**Reconnection behavior:** On BLE reconnect, the app reads Game State to recover current state. The firmware resets Command Result to `[0x00, 0x00, 0x00]` (ok, StartGame, zero-length message) on reconnect — stale results from before disconnection are discarded.
 
 **Player config initial state:** On boot (and after a game ends), White Player and Black Player read as `0xFF` (not a valid player type). The app must write both before Start Game is accepted.
 
-**Command Result behavior:** Every write to Start Game or Match Control produces a Command Result notification — `[0x00]` on success, `[0x01] [error message...]` on failure. Error conditions include:
+**Command Result behavior:** Every write to Start Game or Match Control produces a Command Result notification — `[0x00, source, 0x00]` on success, `[0x01, source, msg_len, msg...]` on failure. The `source` byte echoes which command produced the result, allowing the app to correlate responses without tracking state. Error conditions include:
 - Start Game written before both players are configured (either still reads `0xFF`)
 - Start Game written while a game is already in progress
 - Match Control written when no game is in progress
 - Lichess AI level out of range (must be 1–8)
 - Unrecognized action or player type values
 
-**Game State lifecycle:** After a game ends (checkmate, resignation, draw), Game State remains at the terminal status until the app writes Start Game again. A successful Start Game resets Game State to `0x01` (in progress). The board does not automatically reset to `0x00` (not started) — the terminal state is preserved so the app can display the game result.
+**Game State lifecycle:** After a game ends (checkmate, resignation, draw), Game State remains at the terminal status until the app writes Start Game again. A successful Start Game resets Game State to `0x01` (awaiting pieces) while the player sets up the board, then advances to `0x02` (in progress) once pieces are in their starting positions. The board does not automatically reset to `0x00` (idle) — the terminal state is preserved so the app can display the game result.
 
 ##### Player Config Tagged Format
 
@@ -120,14 +127,15 @@ Lichess AI:      [0x02] [level: u8 (1–8)]
 
 ##### Game Status Values
 
-| Value | Meaning        |
-| ----- | -------------- |
-| 0x00  | Not started (turn=0x00)  |
-| 0x01  | In progress    |
-| 0x02  | Checkmate      |
-| 0x03  | Stalemate      |
-| 0x04  | Resignation    |
-| 0x05  | Draw           |
+| Value | Status          |
+| ----- | --------------- |
+| 0x00  | Idle            |
+| 0x01  | Awaiting pieces |
+| 0x02  | In progress     |
+| 0x03  | Checkmate       |
+| 0x04  | Stalemate       |
+| 0x05  | Resignation     |
+| 0x06  | Draw            |
 
 ##### Command Flow Examples
 
@@ -136,8 +144,10 @@ Lichess AI:      [0x02] [level: u8 (1–8)]
 App writes White Player  → [0x00]                       (human)
 App writes Black Player  → [0x01]                       (embedded engine)
 App writes Start Game    → (empty)
-Board notifies Command Result → [0x00]                  (ok)
-Board notifies Game State     → [0x01] [0x00]           (in progress, white's turn)
+Board notifies Command Result → [0x00] [0x00] [0x00]    (ok, StartGame, no message)
+Board notifies Game State     → [0x01] [0x00]           (awaiting pieces, white's turn)
+  ... pieces placed on starting squares ...
+Board notifies Game State     → [0x02] [0x00]           (in progress, white's turn)
 ```
 
 **Starting a Lichess AI game:**
@@ -154,8 +164,8 @@ App writes Start Game    → (empty)
 **Resigning a game:**
 ```
 App writes Match Control → [0x00] [0x00]                 (resign, white)
-Board notifies Command Result → [0x00]                   (ok)
-Board notifies Game State → [0x04] ...                  (resignation)
+Board notifies Command Result → [0x00] [0x01] [0x00]     (ok, MatchControl, no message)
+Board notifies Game State → [0x05] ...                  (resignation)
 ```
 
 
@@ -250,20 +260,19 @@ SwiftUI + CoreBluetooth. No third-party dependencies.
 ### Screen Flow
 
 ```
-Scan & Connect
+Not connected → ScanView (scanning animation, auto-connects on discovery)
   │
-  ├─ Board not found → scanning animation, retry
-  └─ Connected → Main Menu
-                    │
-                    ├─ New Game
-                    │    ├─ White Player config (type picker + type-specific fields)
-                    │    ├─ Black Player config (same)
-                    │    ├─ If Lichess selected → WiFi setup (if not connected) → token entry
-                    │    └─ Start → writes characteristics, watches for errors
-                    │
-                    └─ Active Game (shown while game is in progress)
-                         ├─ Game state (turn indicator, status)
-                         └─ Match controls (resign)
+  └─ Connected, idle (0x00) → NewGameView
+       ├─ White Player config (type picker + type-specific fields)
+       ├─ Black Player config (same)
+       ├─ If Lichess selected → WiFi setup (if not connected) → token entry
+       └─ Start → writes characteristics, watches for Command Result errors
+            │
+            └─ Game active (0x01–0x06) → ActiveGameView
+                 ├─ Awaiting pieces (0x01): prompt to place pieces on starting squares
+                 ├─ In progress (0x02): turn indicator + match controls (resign)
+                 └─ Terminal (0x03–0x06): game result display + "New Game" button
+                      └─ "New Game" → navigates back to NewGameView
 ```
 
 ### State Management
@@ -278,19 +287,20 @@ A single `BoardConnection` class wraps CoreBluetooth and exposes observable stat
 
 ### Reconnection
 
-If BLE disconnects, the app re-initiates connection from the `didDisconnectPeripheral` delegate callback by calling `centralManager.connect` again. On reconnect, the app reads current Game State. If a game is in progress, it navigates to the Active Game screen.
+If BLE disconnects, the app re-initiates connection from the `didDisconnectPeripheral` delegate callback by calling `centralManager.connect` again. On reconnect, the app reads current Game State. Navigation is driven reactively by the observable `gameState` — once `connectionState` reaches `.ready`, `ContentView` displays `NewGameView` when status is idle (0x00), or `ActiveGameView` for any other status (0x01–0x06). No explicit navigation action is required on reconnect.
 
 ### Project Structure
 
 ```
 companion/
   ChessBoard/
-    ChessBoard.xcodeproj
+    project.yml           # XcodeGen spec (generates .xcodeproj)
     Sources/
       App/              # SwiftUI app entry point
       Views/            # Screens (scan, new game, active game)
       BLE/              # CoreBluetooth manager, GATT UUIDs, characteristic codecs
       Models/           # Player config, game state — mirrors firmware types
+    Tests/              # XCTest unit tests (protocol codecs)
 ```
 
 ## Repository Structure
@@ -302,14 +312,14 @@ unnamed-chess-project/
   src/                    # Rust firmware (unchanged)
   companion/              # iOS app
     ChessBoard/
-      ChessBoard.xcodeproj
+      project.yml         # XcodeGen spec
       Sources/
+      Tests/
   docs/specs/
   Cargo.toml
   justfile
   .github/workflows/
-    ci-firmware.yml       # triggers on src/**, Cargo.*, justfile
-    ci-companion.yml      # triggers on companion/**
+    rust_ci.yml           # triggers on **/*.rs, Cargo.*, .github/workflows/**
 ```
 
 The BLE protocol (GATT service UUIDs, characteristic formats, byte encodings) is documented in this spec and serves as the contract between firmware and app.
