@@ -181,6 +181,14 @@ fn main() {
                         ));
                     }
                 }
+                BleCommand::ConfigureWifi(config) => {
+                    log::info!("WiFi config received: ssid={}", config.ssid);
+                    // TODO(Phase 2): connect to WiFi using config
+                }
+                BleCommand::SetLichessToken(token) => {
+                    log::info!("Lichess token received ({} chars)", token.len());
+                    // TODO(Phase 2): validate and store Lichess token
+                }
             }
         }
 
