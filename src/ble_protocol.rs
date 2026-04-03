@@ -163,20 +163,37 @@ impl BleCommand {
             return Err(ProtocolError::EmptyToken);
         }
 
-        let token_start = 1;
-        let token_end = token_start + token_len;
-
-        if bytes.len() < token_end {
-            return Err(ProtocolError::InsufficientData {
-                needed: token_end,
-                got: bytes.len(),
-            });
-        }
-
-        let token = String::from_utf8_lossy(&bytes[token_start..token_end]).into_owned();
+        let (token, _) = read_length_prefixed_string(bytes, 0)?;
 
         Ok(BleCommand::SetLichessToken(token))
     }
+}
+
+/// Read a length-prefixed string from `bytes` starting at `offset`.
+/// Returns the decoded string and the offset past its end.
+fn read_length_prefixed_string(
+    bytes: &[u8],
+    offset: usize,
+) -> Result<(String, usize), ProtocolError> {
+    if bytes.len() < offset + 1 {
+        return Err(ProtocolError::InsufficientData {
+            needed: offset + 1,
+            got: bytes.len(),
+        });
+    }
+    let len = bytes[offset] as usize;
+    let start = offset + 1;
+    let end = start + len;
+    if bytes.len() < end {
+        return Err(ProtocolError::InsufficientData {
+            needed: end,
+            got: bytes.len(),
+        });
+    }
+    Ok((
+        String::from_utf8_lossy(&bytes[start..end]).into_owned(),
+        end,
+    ))
 }
 
 /// Parse a color byte: `0x00` = white, `0x01` = black.
@@ -290,47 +307,8 @@ impl WifiConfig {
 
         let auth_mode = WifiAuthMode::from_byte(bytes[0])?;
 
-        let ssid_len_pos = 1;
-        if bytes.len() < ssid_len_pos + 1 {
-            return Err(ProtocolError::InsufficientData {
-                needed: ssid_len_pos + 1,
-                got: bytes.len(),
-            });
-        }
-
-        let ssid_len = bytes[ssid_len_pos] as usize;
-        let ssid_start = ssid_len_pos + 1;
-        let ssid_end = ssid_start + ssid_len;
-
-        if bytes.len() < ssid_end {
-            return Err(ProtocolError::InsufficientData {
-                needed: ssid_end,
-                got: bytes.len(),
-            });
-        }
-
-        let ssid = String::from_utf8_lossy(&bytes[ssid_start..ssid_end]).into_owned();
-
-        let pass_len_pos = ssid_end;
-        if bytes.len() < pass_len_pos + 1 {
-            return Err(ProtocolError::InsufficientData {
-                needed: pass_len_pos + 1,
-                got: bytes.len(),
-            });
-        }
-
-        let pass_len = bytes[pass_len_pos] as usize;
-        let pass_start = pass_len_pos + 1;
-        let pass_end = pass_start + pass_len;
-
-        if bytes.len() < pass_end {
-            return Err(ProtocolError::InsufficientData {
-                needed: pass_end,
-                got: bytes.len(),
-            });
-        }
-
-        let password = String::from_utf8_lossy(&bytes[pass_start..pass_end]).into_owned();
+        let (ssid, pass_len_pos) = read_length_prefixed_string(bytes, 1)?;
+        let (password, _) = read_length_prefixed_string(bytes, pass_len_pos)?;
 
         Ok(WifiConfig {
             ssid,
