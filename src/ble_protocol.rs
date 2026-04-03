@@ -14,6 +14,8 @@ pub enum ProtocolError {
     UnknownColor(u8),
     #[error("unknown auth mode byte: 0x{0:02x}")]
     UnknownAuthMode(u8),
+    #[error("empty Lichess token")]
+    EmptyToken,
 }
 
 /// Sentinel byte indicating a player slot has not yet been configured.
@@ -123,6 +125,7 @@ pub enum BleCommand {
     StartGame,
     Resign { color: Color },
     ConfigureWifi(WifiConfig),
+    SetLichessToken(String),
 }
 
 impl BleCommand {
@@ -144,6 +147,35 @@ impl BleCommand {
             0x00 => Ok(BleCommand::Resign { color }),
             other => Err(ProtocolError::UnknownAction(other)),
         }
+    }
+
+    /// Parse a Lichess Token characteristic write.
+    ///
+    /// Format: `[token_len: u8, token_bytes...]`
+    /// Rejects empty tokens (token_len = 0).
+    pub fn parse_lichess_token(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.is_empty() {
+            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
+        }
+
+        let token_len = bytes[0] as usize;
+        if token_len == 0 {
+            return Err(ProtocolError::EmptyToken);
+        }
+
+        let token_start = 1;
+        let token_end = token_start + token_len;
+
+        if bytes.len() < token_end {
+            return Err(ProtocolError::InsufficientData {
+                needed: token_end,
+                got: bytes.len(),
+            });
+        }
+
+        let token = String::from_utf8_lossy(&bytes[token_start..token_end]).into_owned();
+
+        Ok(BleCommand::SetLichessToken(token))
     }
 }
 
@@ -372,6 +404,80 @@ impl WifiStatus {
     pub fn encode(&self) -> Vec<u8> {
         let msg_bytes = self.message.as_bytes();
         let msg_len = u8::try_from(msg_bytes.len()).expect("WifiStatus message exceeds 255 bytes");
+
+        let mut out = Vec::with_capacity(2 + msg_bytes.len());
+        out.push(u8::from(self.state));
+        out.push(msg_len);
+        out.extend_from_slice(msg_bytes);
+        out
+    }
+}
+
+/// Lichess connection state.
+///
+/// Wire encoding:
+/// - Idle:       0x00
+/// - Validating: 0x01
+/// - Connected:  0x02
+/// - Failed:     0x03
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum LichessState {
+    Idle = 0x00,
+    Validating = 0x01,
+    Connected = 0x02,
+    Failed = 0x03,
+}
+
+impl From<LichessState> for u8 {
+    fn from(state: LichessState) -> u8 {
+        state as u8
+    }
+}
+
+/// Lichess status sent to the app via BLE notification.
+///
+/// Wire encoding: `[state: u8, msg_len: u8, msg_bytes...]`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LichessStatus {
+    pub state: LichessState,
+    pub message: String,
+}
+
+impl LichessStatus {
+    pub fn idle() -> Self {
+        Self {
+            state: LichessState::Idle,
+            message: String::new(),
+        }
+    }
+
+    pub fn validating() -> Self {
+        Self {
+            state: LichessState::Validating,
+            message: String::new(),
+        }
+    }
+
+    pub fn connected() -> Self {
+        Self {
+            state: LichessState::Connected,
+            message: String::new(),
+        }
+    }
+
+    pub fn failed(msg: impl Into<String>) -> Self {
+        Self {
+            state: LichessState::Failed,
+            message: msg.into(),
+        }
+    }
+
+    /// Panics if message exceeds 255 bytes.
+    pub fn encode(&self) -> Vec<u8> {
+        let msg_bytes = self.message.as_bytes();
+        let msg_len =
+            u8::try_from(msg_bytes.len()).expect("LichessStatus message exceeds 255 bytes");
 
         let mut out = Vec::with_capacity(2 + msg_bytes.len());
         out.push(u8::from(self.state));
@@ -777,5 +883,74 @@ mod tests {
         assert_eq!(encoded[0], 0x03);
         assert_eq!(encoded[1], 7); // "timeout" is 7 bytes
         assert_eq!(&encoded[2..], b"timeout");
+    }
+
+    // Lichess token parsing tests
+    #[test]
+    fn parse_lichess_token_valid() {
+        let bytes = [
+            11u8, b'l', b'i', b'p', b'_', b'a', b'b', b'c', b'1', b'2', b'3', b'4',
+        ];
+        let result = BleCommand::parse_lichess_token(&bytes);
+        assert_eq!(
+            result,
+            Ok(BleCommand::SetLichessToken("lip_abc1234".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_lichess_token_empty() {
+        let bytes = [0u8];
+        let result = BleCommand::parse_lichess_token(&bytes);
+        assert!(matches!(result, Err(ProtocolError::EmptyToken)));
+    }
+
+    #[test]
+    fn parse_lichess_token_truncated() {
+        // token_len=10 but only 3 bytes follow
+        let bytes = [10u8, b'a', b'b', b'c'];
+        let result = BleCommand::parse_lichess_token(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 11, got: 4 })
+        ));
+    }
+
+    #[test]
+    fn parse_lichess_token_no_data() {
+        let bytes = [];
+        let result = BleCommand::parse_lichess_token(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
+        ));
+    }
+
+    // Lichess status encoding tests
+    #[test]
+    fn encode_lichess_idle() {
+        let status = LichessStatus::idle();
+        assert_eq!(status.encode(), vec![0x00, 0x00]);
+    }
+
+    #[test]
+    fn encode_lichess_validating() {
+        let status = LichessStatus::validating();
+        assert_eq!(status.encode(), vec![0x01, 0x00]);
+    }
+
+    #[test]
+    fn encode_lichess_connected() {
+        let status = LichessStatus::connected();
+        assert_eq!(status.encode(), vec![0x02, 0x00]);
+    }
+
+    #[test]
+    fn encode_lichess_failed() {
+        let status = LichessStatus::failed("invalid token");
+        let encoded = status.encode();
+        assert_eq!(encoded[0], 0x03);
+        assert_eq!(encoded[1], 13); // "invalid token" is 13 bytes
+        assert_eq!(&encoded[2..], b"invalid token");
     }
 }
