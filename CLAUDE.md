@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-ESP32-S3 smart chess board firmware in Rust, plus an iOS companion app (SwiftUI + CoreBluetooth). Hall-effect sensors detect per-color piece positions; LEDs provide move feedback. Uses `shakmaty` for chess logic. The companion app connects via BLE to configure and start games. Supports human-vs-human and human-vs-embedded-engine modes (Phase 1); Lichess AI via HTTP is Phase 2.
+ESP32-S3 smart chess board firmware in Rust, plus an iOS companion app (SwiftUI + CoreBluetooth). Hall-effect sensors detect per-color piece positions; LEDs provide move feedback. Uses `shakmaty` for chess logic. The companion app connects via BLE to configure players, send WiFi/Lichess credentials, and start games. Supports human-vs-human, human-vs-embedded-engine, and human-vs-Lichess-AI modes.
 
 ## Build and Test Commands
 
@@ -86,11 +86,10 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **player/embedded.rs** — `EmbeddedEngine`: heuristic AI (captures > castling > promotions > random)
 - **feedback.rs** — `compute_feedback` and `compute_state_feedback`: feedback from position + sensors. Recovery guidance is integrated as a fallback path.
 - **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame; also exposes `resign()`, `is_game_over()`, and `game_state()` for BLE game lifecycle management
-- **provisioning.rs** — `BoardConfig` struct, `ValidationError`, validation logic (platform-independent, host-testable)
-- **ble_protocol.rs** — `BleCommand`, `PlayerConfig`, `GameState`, `CommandResult`, UUID constants, binary encoding/decoding. Platform-independent, host-testable.
+- **ble_protocol.rs** — `BleCommand`, `PlayerConfig`, `GameState`, `CommandResult`, `WifiAuthMode`, `WifiConfig`, `WifiState`, `WifiStatus`, `LichessState`, `LichessStatus`, UUID constants, binary encoding/decoding. Platform-independent, host-testable.
 - **esp32/sensor.rs** — `Esp32PieceSensor`: ADC + mux scanning, `RawScan` for raw millivolt readings, `read_raw()` primitive
-- **esp32/ble.rs** — `start_ble()` initializes NimBLE and returns `BleCommands` (command receiver) + `BleNotifier` (characteristic updater). Three GATT services (WiFi/Lichess stubs + Game), typed characteristic handles.
-- **esp32/provisioning.rs** — NVS `load`/`save` for `BoardConfig` and `SensorCalibration`. The SoftAP + HTTP provisioning server is legacy code no longer called from `main.rs`; it will be removed in Phase 2.
+- **esp32/ble.rs** — `start_ble()` initializes NimBLE and returns `BleCommands` (command receiver) + `BleNotifier` (characteristic updater). Three fully functional GATT services (WiFi, Lichess, Game), typed characteristic handles.
+- **esp32/config.rs** — `SensorCalibration` NVS load/save (cal partition), `CalibrationError`, `SensorConfig`, `LedPalette`, `Rgb8` display/sensor configuration types
 - **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player`
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
 - **testutil/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
@@ -116,9 +115,9 @@ Used by `ScriptedSensor` in `testutil/script.rs` and extensively in `player/huma
 
 ## Provisioning
 
-On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE to configure players and start games. WiFi and Lichess configuration will be added in Phase 2.
+On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE, sends WiFi credentials and Lichess API token each session (nothing persisted to NVS), and starts games. Only sensor calibration data is persisted to NVS (in the separate `cal` partition).
 
-`just erase-nvs` clears the main NVS partition. In Phase 1 this partition does not store WiFi credentials; it may store BLE bonding keys in the future.
+`just erase-nvs` clears the main NVS partition. It does not affect sensor calibration.
 
 The `IDF_PATH` build variable can still be set in `.env` (loaded via the justfile's `set dotenv-load`).
 

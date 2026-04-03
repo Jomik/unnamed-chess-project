@@ -12,6 +12,10 @@ pub enum ProtocolError {
     UnknownAction(u8),
     #[error("unknown color byte: 0x{0:02x}")]
     UnknownColor(u8),
+    #[error("unknown auth mode byte: 0x{0:02x}")]
+    UnknownAuthMode(u8),
+    #[error("empty Lichess token")]
+    EmptyToken,
 }
 
 /// Sentinel byte indicating a player slot has not yet been configured.
@@ -120,6 +124,8 @@ pub enum BleCommand {
     SetBlackPlayer(PlayerConfig),
     StartGame,
     Resign { color: Color },
+    ConfigureWifi(WifiConfig),
+    SetLichessToken(String),
 }
 
 impl BleCommand {
@@ -142,6 +148,52 @@ impl BleCommand {
             other => Err(ProtocolError::UnknownAction(other)),
         }
     }
+
+    /// Parse a Lichess Token characteristic write.
+    ///
+    /// Format: `[token_len: u8, token_bytes...]`
+    /// Rejects empty tokens (token_len = 0).
+    pub fn parse_lichess_token(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.is_empty() {
+            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
+        }
+
+        let token_len = bytes[0] as usize;
+        if token_len == 0 {
+            return Err(ProtocolError::EmptyToken);
+        }
+
+        let (token, _) = read_length_prefixed_string(bytes, 0)?;
+
+        Ok(BleCommand::SetLichessToken(token))
+    }
+}
+
+/// Read a length-prefixed string from `bytes` starting at `offset`.
+/// Returns the decoded string and the offset past its end.
+fn read_length_prefixed_string(
+    bytes: &[u8],
+    offset: usize,
+) -> Result<(String, usize), ProtocolError> {
+    if bytes.len() < offset + 1 {
+        return Err(ProtocolError::InsufficientData {
+            needed: offset + 1,
+            got: bytes.len(),
+        });
+    }
+    let len = bytes[offset] as usize;
+    let start = offset + 1;
+    let end = start + len;
+    if bytes.len() < end {
+        return Err(ProtocolError::InsufficientData {
+            needed: end,
+            got: bytes.len(),
+        });
+    }
+    Ok((
+        String::from_utf8_lossy(&bytes[start..end]).into_owned(),
+        end,
+    ))
 }
 
 /// Parse a color byte: `0x00` = white, `0x01` = black.
@@ -200,6 +252,213 @@ impl CommandResult {
         let mut out = Vec::with_capacity(3 + msg_bytes.len());
         out.push(ok_byte);
         out.push(self.source as u8);
+        out.push(msg_len);
+        out.extend_from_slice(msg_bytes);
+        out
+    }
+}
+
+/// WiFi authentication mode.
+///
+/// Wire encoding:
+/// - Open:  0x00
+/// - WPA2:  0x01
+/// - WPA3:  0x02
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WifiAuthMode {
+    Open = 0x00,
+    Wpa2 = 0x01,
+    Wpa3 = 0x02,
+}
+
+impl WifiAuthMode {
+    pub fn from_byte(byte: u8) -> Result<Self, ProtocolError> {
+        match byte {
+            0x00 => Ok(WifiAuthMode::Open),
+            0x01 => Ok(WifiAuthMode::Wpa2),
+            0x02 => Ok(WifiAuthMode::Wpa3),
+            other => Err(ProtocolError::UnknownAuthMode(other)),
+        }
+    }
+}
+
+impl From<WifiAuthMode> for u8 {
+    fn from(mode: WifiAuthMode) -> u8 {
+        mode as u8
+    }
+}
+
+/// WiFi configuration sent via BLE.
+///
+/// Wire encoding: `[auth_mode: u8, ssid_len: u8, ssid_bytes..., pass_len: u8, pass_bytes...]`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WifiConfig {
+    pub ssid: String,
+    pub password: String,
+    pub auth_mode: WifiAuthMode,
+}
+
+impl WifiConfig {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.is_empty() {
+            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
+        }
+
+        let auth_mode = WifiAuthMode::from_byte(bytes[0])?;
+
+        let (ssid, pass_len_pos) = read_length_prefixed_string(bytes, 1)?;
+        let (password, _) = read_length_prefixed_string(bytes, pass_len_pos)?;
+
+        Ok(WifiConfig {
+            ssid,
+            password,
+            auth_mode,
+        })
+    }
+}
+
+/// WiFi connection state.
+///
+/// Wire encoding:
+/// - Disconnected: 0x00
+/// - Connecting:   0x01
+/// - Connected:    0x02
+/// - Failed:       0x03
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WifiState {
+    Disconnected = 0x00,
+    Connecting = 0x01,
+    Connected = 0x02,
+    Failed = 0x03,
+}
+
+impl From<WifiState> for u8 {
+    fn from(state: WifiState) -> u8 {
+        state as u8
+    }
+}
+
+/// WiFi status sent to the app via BLE notification.
+///
+/// Wire encoding: `[state: u8, msg_len: u8, msg_bytes...]`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WifiStatus {
+    pub state: WifiState,
+    pub message: String,
+}
+
+impl WifiStatus {
+    pub fn disconnected() -> Self {
+        Self {
+            state: WifiState::Disconnected,
+            message: String::new(),
+        }
+    }
+
+    pub fn connecting() -> Self {
+        Self {
+            state: WifiState::Connecting,
+            message: String::new(),
+        }
+    }
+
+    pub fn connected() -> Self {
+        Self {
+            state: WifiState::Connected,
+            message: String::new(),
+        }
+    }
+
+    pub fn failed(msg: impl Into<String>) -> Self {
+        Self {
+            state: WifiState::Failed,
+            message: msg.into(),
+        }
+    }
+
+    /// Panics if message exceeds 255 bytes.
+    pub fn encode(&self) -> Vec<u8> {
+        let msg_bytes = self.message.as_bytes();
+        let msg_len = u8::try_from(msg_bytes.len()).expect("WifiStatus message exceeds 255 bytes");
+
+        let mut out = Vec::with_capacity(2 + msg_bytes.len());
+        out.push(u8::from(self.state));
+        out.push(msg_len);
+        out.extend_from_slice(msg_bytes);
+        out
+    }
+}
+
+/// Lichess connection state.
+///
+/// Wire encoding:
+/// - Idle:       0x00
+/// - Validating: 0x01
+/// - Connected:  0x02
+/// - Failed:     0x03
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum LichessState {
+    Idle = 0x00,
+    Validating = 0x01,
+    Connected = 0x02,
+    Failed = 0x03,
+}
+
+impl From<LichessState> for u8 {
+    fn from(state: LichessState) -> u8 {
+        state as u8
+    }
+}
+
+/// Lichess status sent to the app via BLE notification.
+///
+/// Wire encoding: `[state: u8, msg_len: u8, msg_bytes...]`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LichessStatus {
+    pub state: LichessState,
+    pub message: String,
+}
+
+impl LichessStatus {
+    pub fn idle() -> Self {
+        Self {
+            state: LichessState::Idle,
+            message: String::new(),
+        }
+    }
+
+    pub fn validating() -> Self {
+        Self {
+            state: LichessState::Validating,
+            message: String::new(),
+        }
+    }
+
+    pub fn connected() -> Self {
+        Self {
+            state: LichessState::Connected,
+            message: String::new(),
+        }
+    }
+
+    pub fn failed(msg: impl Into<String>) -> Self {
+        Self {
+            state: LichessState::Failed,
+            message: msg.into(),
+        }
+    }
+
+    /// Panics if message exceeds 255 bytes.
+    pub fn encode(&self) -> Vec<u8> {
+        let msg_bytes = self.message.as_bytes();
+        let msg_len =
+            u8::try_from(msg_bytes.len()).expect("LichessStatus message exceeds 255 bytes");
+
+        let mut out = Vec::with_capacity(2 + msg_bytes.len());
+        out.push(u8::from(self.state));
         out.push(msg_len);
         out.extend_from_slice(msg_bytes);
         out
@@ -498,5 +757,178 @@ mod tests {
             uuids::LICHESS_STATUS,
             "3d6343a2-3003-44ea-8fc2-3568d7216866"
         );
+    }
+
+    // WiFi config parsing tests
+    #[test]
+    fn parse_wifi_config_wpa2() {
+        // [auth=0x01][ssid_len=5][ssid="MyNet"][pass_len=7][pass="pass123"]
+        let bytes = [
+            0x01u8, 5, b'M', b'y', b'N', b'e', b't', 7, b'p', b'a', b's', b's', b'1', b'2', b'3',
+        ];
+        let config = WifiConfig::from_bytes(&bytes).expect("should parse WPA2 config");
+        assert_eq!(config.ssid, "MyNet");
+        assert_eq!(config.password, "pass123");
+        assert_eq!(config.auth_mode, WifiAuthMode::Wpa2);
+    }
+
+    #[test]
+    fn parse_wifi_config_open() {
+        // [auth=0x00][ssid_len=4][ssid="Open"][pass_len=0]
+        let bytes = [0x00u8, 4, b'O', b'p', b'e', b'n', 0];
+        let config = WifiConfig::from_bytes(&bytes).expect("should parse Open config");
+        assert_eq!(config.ssid, "Open");
+        assert_eq!(config.password, "");
+        assert_eq!(config.auth_mode, WifiAuthMode::Open);
+    }
+
+    #[test]
+    fn parse_wifi_config_wpa3() {
+        // [auth=0x02][ssid_len=7][ssid="Network"][pass_len=8][pass="password"]
+        let bytes = [
+            0x02u8, 7, b'N', b'e', b't', b'w', b'o', b'r', b'k', 8, b'p', b'a', b's', b's', b'w',
+            b'o', b'r', b'd',
+        ];
+        let config = WifiConfig::from_bytes(&bytes).expect("should parse WPA3 config");
+        assert_eq!(config.ssid, "Network");
+        assert_eq!(config.password, "password");
+        assert_eq!(config.auth_mode, WifiAuthMode::Wpa3);
+    }
+
+    #[test]
+    fn parse_wifi_config_empty_bytes() {
+        let bytes = b"";
+        let result = WifiConfig::from_bytes(bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
+        ));
+    }
+
+    #[test]
+    fn parse_wifi_config_truncated_ssid() {
+        // [auth=0x01][ssid_len=5][ssid="abc"] - claims 5 bytes but only has 3
+        let bytes = [0x01u8, 5, b'a', b'b', b'c'];
+        let result = WifiConfig::from_bytes(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 7, got: 5 })
+        ));
+    }
+
+    #[test]
+    fn parse_wifi_config_missing_pass_len() {
+        // [auth=0x01][ssid_len=3][ssid="Net"] - missing pass_len byte
+        let bytes = [0x01u8, 3, b'N', b'e', b't'];
+        let result = WifiConfig::from_bytes(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 6, got: 5 })
+        ));
+    }
+
+    #[test]
+    fn parse_wifi_config_unknown_auth() {
+        // [auth=0x03][ssid_len=3][ssid="Net"][pass_len=4][pass="pass"]
+        let bytes = [0x03u8, 3, b'N', b'e', b't', 4, b'p', b'a', b's', b's'];
+        let result = WifiConfig::from_bytes(&bytes);
+        assert!(matches!(result, Err(ProtocolError::UnknownAuthMode(0x03))));
+    }
+
+    // WiFi status encoding tests
+    #[test]
+    fn encode_wifi_disconnected() {
+        let status = WifiStatus::disconnected();
+        assert_eq!(status.encode(), vec![0x00, 0x00]);
+    }
+
+    #[test]
+    fn encode_wifi_connecting() {
+        let status = WifiStatus::connecting();
+        assert_eq!(status.encode(), vec![0x01, 0x00]);
+    }
+
+    #[test]
+    fn encode_wifi_connected() {
+        let status = WifiStatus::connected();
+        assert_eq!(status.encode(), vec![0x02, 0x00]);
+    }
+
+    #[test]
+    fn encode_wifi_failed() {
+        let status = WifiStatus::failed("timeout");
+        let encoded = status.encode();
+        assert_eq!(encoded[0], 0x03);
+        assert_eq!(encoded[1], 7); // "timeout" is 7 bytes
+        assert_eq!(&encoded[2..], b"timeout");
+    }
+
+    // Lichess token parsing tests
+    #[test]
+    fn parse_lichess_token_valid() {
+        let bytes = [
+            11u8, b'l', b'i', b'p', b'_', b'a', b'b', b'c', b'1', b'2', b'3', b'4',
+        ];
+        let result = BleCommand::parse_lichess_token(&bytes);
+        assert_eq!(
+            result,
+            Ok(BleCommand::SetLichessToken("lip_abc1234".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_lichess_token_empty() {
+        let bytes = [0u8];
+        let result = BleCommand::parse_lichess_token(&bytes);
+        assert!(matches!(result, Err(ProtocolError::EmptyToken)));
+    }
+
+    #[test]
+    fn parse_lichess_token_truncated() {
+        // token_len=10 but only 3 bytes follow
+        let bytes = [10u8, b'a', b'b', b'c'];
+        let result = BleCommand::parse_lichess_token(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 11, got: 4 })
+        ));
+    }
+
+    #[test]
+    fn parse_lichess_token_no_data() {
+        let bytes = [];
+        let result = BleCommand::parse_lichess_token(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
+        ));
+    }
+
+    // Lichess status encoding tests
+    #[test]
+    fn encode_lichess_idle() {
+        let status = LichessStatus::idle();
+        assert_eq!(status.encode(), vec![0x00, 0x00]);
+    }
+
+    #[test]
+    fn encode_lichess_validating() {
+        let status = LichessStatus::validating();
+        assert_eq!(status.encode(), vec![0x01, 0x00]);
+    }
+
+    #[test]
+    fn encode_lichess_connected() {
+        let status = LichessStatus::connected();
+        assert_eq!(status.encode(), vec![0x02, 0x00]);
+    }
+
+    #[test]
+    fn encode_lichess_failed() {
+        let status = LichessStatus::failed("invalid token");
+        let encoded = status.encode();
+        assert_eq!(encoded[0], 0x03);
+        assert_eq!(encoded[1], 13); // "invalid token" is 13 bytes
+        assert_eq!(&encoded[2..], b"invalid token");
     }
 }

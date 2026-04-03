@@ -34,7 +34,6 @@ thiserror = "2.0.17"
 embedded-svc = { version = "0.29", default-features = false }
 esp-idf-svc = "0.52.1"
 esp32-nimble = "0.12"
-form_urlencoded = "1.2.2"
 
 # --- Optional Embassy Integration ---
 # esp-idf-svc = { version = "0.52", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }

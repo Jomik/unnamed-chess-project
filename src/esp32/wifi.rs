@@ -25,13 +25,14 @@ pub struct WifiConnection<'d> {
 }
 
 impl WifiConnection<'_> {
-    /// Connect to a WPA2 network and block until an IP is acquired.
+    /// Connect to a WiFi network and block until an IP is acquired.
     pub fn connect(
         modem: impl WifiModemPeripheral + 'static,
         sys_loop: EspSystemEventLoop,
         nvs: EspDefaultNvsPartition,
         ssid: &str,
         password: &str,
+        auth_method: AuthMethod,
     ) -> Result<Self, WifiError> {
         let esp_wifi = EspWifi::new(modem, sys_loop.clone(), Some(nvs))
             .map_err(|e| WifiError::DriverInit(e.to_string()))?;
@@ -43,7 +44,7 @@ impl WifiConnection<'_> {
             ssid: ssid.try_into().map_err(|_| {
                 WifiError::Configuration(format!("SSID too long (max 32 bytes): {ssid}"))
             })?,
-            auth_method: AuthMethod::WPA2Personal,
+            auth_method,
             password: password.try_into().map_err(|_| {
                 WifiError::Configuration("password too long (max 64 bytes)".to_string())
             })?,

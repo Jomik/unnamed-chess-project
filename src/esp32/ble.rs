@@ -8,7 +8,8 @@ use esp32_nimble::{
 use shakmaty::Color;
 
 use crate::ble_protocol::{
-    BleCommand, CommandResult, CommandSource, GameState, PlayerConfig, UNSET_BYTE, uuids,
+    BleCommand, CommandResult, CommandSource, GameState, LichessStatus, PlayerConfig, UNSET_BYTE,
+    WifiConfig, WifiStatus, uuids,
 };
 
 use alloc::sync::Arc;
@@ -29,6 +30,24 @@ struct GameStateHandle(ChrHandle);
 impl GameStateHandle {
     fn notify(&self, state: &GameState) {
         let encoded = state.encode();
+        self.0.lock().set_value(&encoded).notify();
+    }
+}
+
+struct WifiStatusHandle(ChrHandle);
+
+impl WifiStatusHandle {
+    fn notify(&self, status: &WifiStatus) {
+        let encoded = status.encode();
+        self.0.lock().set_value(&encoded).notify();
+    }
+}
+
+struct LichessStatusHandle(ChrHandle);
+
+impl LichessStatusHandle {
+    fn notify(&self, status: &LichessStatus) {
+        let encoded = status.encode();
         self.0.lock().set_value(&encoded).notify();
     }
 }
@@ -86,6 +105,8 @@ pub struct BleNotifier {
     command_result: CommandResultHandle,
     white_player: PlayerConfigHandle,
     black_player: PlayerConfigHandle,
+    wifi_status: WifiStatusHandle,
+    lichess_status: LichessStatusHandle,
 }
 
 impl std::fmt::Debug for BleNotifier {
@@ -109,6 +130,14 @@ impl BleNotifier {
             Color::Black => self.black_player.update(bytes),
         }
     }
+
+    pub fn notify_wifi_status(&self, status: &WifiStatus) {
+        self.wifi_status.notify(status);
+    }
+
+    pub fn notify_lichess_status(&self, status: &LichessStatus) {
+        self.lichess_status.notify(status);
+    }
 }
 
 /// Returns [`BleCommands`] (inbound) and [`BleNotifier`] (outbound).
@@ -119,19 +148,9 @@ pub fn start_ble() -> Result<(BleCommands, BleNotifier), BleError> {
 
     let server = device.get_server();
 
-    register_stub_service(
-        server,
-        uuid128!(uuids::WIFI_SERVICE),
-        uuid128!(uuids::WIFI_CONFIG),
-        uuid128!(uuids::WIFI_STATUS),
-    );
+    let wifi_status = register_wifi_service(server, &tx);
 
-    register_stub_service(
-        server,
-        uuid128!(uuids::LICHESS_SERVICE),
-        uuid128!(uuids::LICHESS_TOKEN),
-        uuid128!(uuids::LICHESS_STATUS),
-    );
+    let lichess_status = register_lichess_service(server, &tx);
 
     let GameHandles {
         white_player,
@@ -169,29 +188,82 @@ pub fn start_ble() -> Result<(BleCommands, BleNotifier), BleError> {
             command_result,
             white_player,
             black_player,
+            wifi_status,
+            lichess_status,
         },
     ))
 }
 
-/// WiFi and Lichess stubs -- must exist in GATT table for forward compatibility.
-fn register_stub_service(
+fn register_wifi_service(
     server: &mut BLEServer,
-    service_uuid: BleUuid,
-    config_uuid: BleUuid,
-    status_uuid: BleUuid,
-) {
-    let svc = server.create_service(service_uuid);
+    tx: &mpsc::SyncSender<BleCommand>,
+) -> WifiStatusHandle {
+    let svc = server.create_service(uuid128!(uuids::WIFI_SERVICE));
     let mut svc = svc.lock();
 
-    let config_chr = svc.create_characteristic(config_uuid, NimbleProperties::WRITE);
-    config_chr.lock().on_write(|args| {
-        args.reject_with_error_code(ATT_ERR_REQUEST_NOT_SUPPORTED);
-    });
+    let config_chr =
+        svc.create_characteristic(uuid128!(uuids::WIFI_CONFIG), NimbleProperties::WRITE);
+    {
+        let tx = tx.clone();
+        config_chr
+            .lock()
+            .on_write(move |args| match WifiConfig::from_bytes(args.recv_data()) {
+                Ok(config) => {
+                    if let Err(e) = tx.try_send(BleCommand::ConfigureWifi(config)) {
+                        log::warn!("BLE command channel full (wifi_config): {e}");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Invalid WiFi Config write: {e}");
+                    args.reject_with_error_code(ATT_ERR_REQUEST_NOT_SUPPORTED);
+                }
+            });
+    }
 
-    let _status_chr = svc.create_characteristic(
-        status_uuid,
+    let status_chr = svc.create_characteristic(
+        uuid128!(uuids::WIFI_STATUS),
         NimbleProperties::READ | NimbleProperties::NOTIFY,
     );
+    status_chr
+        .lock()
+        .set_value(&WifiStatus::disconnected().encode());
+
+    WifiStatusHandle(status_chr)
+}
+
+fn register_lichess_service(
+    server: &mut BLEServer,
+    tx: &mpsc::SyncSender<BleCommand>,
+) -> LichessStatusHandle {
+    let svc = server.create_service(uuid128!(uuids::LICHESS_SERVICE));
+    let mut svc = svc.lock();
+
+    let token_chr =
+        svc.create_characteristic(uuid128!(uuids::LICHESS_TOKEN), NimbleProperties::WRITE);
+    {
+        let tx = tx.clone();
+        token_chr.lock().on_write(move |args| {
+            match BleCommand::parse_lichess_token(args.recv_data()) {
+                Ok(cmd) => {
+                    if let Err(e) = tx.try_send(cmd) {
+                        log::warn!("BLE command channel full (lichess_token): {e}");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Invalid Lichess Token write: {e}");
+                    args.reject_with_error_code(ATT_ERR_REQUEST_NOT_SUPPORTED);
+                }
+            }
+        });
+    }
+
+    let status_chr = svc.create_characteristic(
+        uuid128!(uuids::LICHESS_STATUS),
+        NimbleProperties::READ | NimbleProperties::NOTIFY,
+    );
+    status_chr.lock().set_value(&LichessStatus::idle().encode());
+
+    LichessStatusHandle(status_chr)
 }
 
 fn register_player_characteristic(
