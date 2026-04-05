@@ -1,8 +1,5 @@
 # BLE Companion App Design
 
-**Status:** Draft
-**Date:** 2026-03-31
-
 ## Overview
 
 An iOS companion app that communicates with the chess board over BLE. The app serves as the sole configuration and control interface — the board is stateless (except sensor calibration) and requires the app to start a game.
@@ -287,7 +284,9 @@ A single `BoardConnection` class wraps CoreBluetooth and exposes observable stat
 
 ### Reconnection
 
-If BLE disconnects, the app re-initiates connection from the `didDisconnectPeripheral` delegate callback by calling `centralManager.connect` again. On reconnect, the app reads current Game State. Navigation is driven reactively by the observable `gameState` — once `connectionState` reaches `.ready`, `ContentView` displays `NewGameView` when status is idle (0x00), or `ActiveGameView` for any other status (0x01–0x06). No explicit navigation action is required on reconnect.
+If BLE disconnects, the app re-initiates connection from the `didDisconnectPeripheral` delegate callback by calling `centralManager.connect` again. On reconnect, the app reads current Game State, WiFi Status, and Lichess Status. The firmware retains WiFi and Lichess status across BLE reconnections (only Command Result is reset on reconnect). Navigation is driven reactively by the observable `gameState` — once `connectionState` reaches `.ready`, `ContentView` displays `NewGameView` when status is idle (0x00), or `ActiveGameView` for any other status (0x01–0x06). No explicit navigation action is required on reconnect.
+
+If WiFi drops during an active Lichess game, the board's Lichess connection breaks and the game ends via the board's game state transition (the firmware moves to a terminal status). The app surfaces this through the existing Game State notification path — no WiFi-specific UI is needed in ActiveGameView.
 
 ### Project Structure
 
@@ -358,7 +357,7 @@ All three GATT services are registered from Phase 1 onward. In Phase 1, WiFi and
 - Lichess token entry with validation
 - Lichess AI player type in game setup
 
-Each phase is independently shippable — the board works at every stage.
+Each phase is independently shippable — the board works at every stage. The Phase 2 app requires Phase 2 firmware — connecting to Phase 1 firmware will result in ATT errors for WiFi/Lichess characteristics.
 
 
 ## Appendix: GATT UUID Registry
