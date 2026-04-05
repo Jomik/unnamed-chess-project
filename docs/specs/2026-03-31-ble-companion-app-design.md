@@ -168,7 +168,7 @@ Board notifies Game State → [0x05] ...                  (resignation)
 
 #### WiFi Service
 
-Manages WiFi connectivity (UUID prefix 2xxx). The app writes credentials; the board attempts connection and reports status. Phase 2 — currently stubbed with ATT error 0x06.
+Manages WiFi connectivity (UUID prefix 2xxx). The app writes credentials; the board attempts connection and reports status.
 
 | Characteristic   | Properties   | Payload                                                       |
 | ----------------- | ------------ | ------------------------------------------------------------- |
@@ -198,7 +198,7 @@ Unrecognized auth mode values cause WiFi Status to transition to `0x03` (Failed)
 
 #### Lichess Service
 
-Manages Lichess API connectivity (UUID prefix 3xxx). Requires WiFi to be connected first. Phase 2 — currently stubbed with ATT error 0x06.
+Manages Lichess API connectivity (UUID prefix 3xxx). Requires WiFi to be connected first.
 
 | Characteristic   | Properties   | Payload                                                       |
 | ----------------- | ------------ | ------------------------------------------------------------- |
@@ -299,6 +299,7 @@ companion/
       Views/            # Screens (scan, new game, active game)
       BLE/              # CoreBluetooth manager, GATT UUIDs, characteristic codecs
       Models/           # Player config, game state — mirrors firmware types
+      Persistence/      # Keychain credential storage
     Tests/              # XCTest unit tests (protocol codecs)
 ```
 
