@@ -59,19 +59,32 @@ erase-cal:
     cargo +esp espflash erase-parts --partition-table partitions.csv cal
 
 # Build companion iOS app (simulator)
+[working-directory: 'companion/ChessBoard']
 companion-build:
-    cd companion/ChessBoard && xcodegen generate
-    cd companion/ChessBoard && xcodebuild build -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'generic/platform=iOS Simulator' -quiet
+    xcodegen generate
+    xcodebuild build -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'generic/platform=iOS Simulator' -quiet
 
 # Run companion iOS app tests
+[working-directory: 'companion/ChessBoard']
 companion-test:
-    cd companion/ChessBoard && xcodegen generate
-    cd companion/ChessBoard && xcodebuild test -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.0' -quiet
+    xcodegen generate
+    xcodebuild test -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.0' -quiet
 
 # Open companion iOS app in Xcode (for device deployment)
+[working-directory: 'companion/ChessBoard']
 companion-open:
-    cd companion/ChessBoard && xcodegen generate
-    open companion/ChessBoard/ChessBoard.xcodeproj
+    xcodegen generate
+    open ChessBoard.xcodeproj
+
+# Format Swift code (swift-format)
+[working-directory: 'companion/ChessBoard']
+companion-fmt:
+    swift-format format --in-place --recursive .
+
+# Check Swift formatting (strict, errors on violations)
+[working-directory: 'companion/ChessBoard']
+companion-lint:
+    swift-format lint --strict --recursive .
 
 # Install ESP Xtensa toolchain (run once after installing rustup)
 setup-esp:

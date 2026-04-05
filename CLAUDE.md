@@ -27,9 +27,11 @@ The companion app is at `companion/ChessBoard/`. It uses XcodeGen to generate th
 just companion-build   # Generate .xcodeproj + build for simulator
 just companion-test    # Generate .xcodeproj + run tests
 just companion-open    # Generate .xcodeproj + open in Xcode
+just companion-fmt     # Format Swift code (swift-format)
+just companion-lint    # Check Swift formatting (strict, errors on violations)
 ```
 
-Requires Xcode 15+ and XcodeGen (`brew install xcodegen`). BLE does not work in the simulator — use a physical device for end-to-end testing.
+Requires Xcode 15+, XcodeGen (`brew install xcodegen`), and swift-format (`brew install swift-format`). BLE does not work in the simulator — use a physical device for end-to-end testing.
 
 For physical device deployment, copy `companion/ChessBoard/Local.xcconfig.template` to `Local.xcconfig` and set your `DEVELOPMENT_TEAM` ID.
 
@@ -39,7 +41,7 @@ For physical device deployment, copy `companion/ChessBoard/Local.xcconfig.templa
 just fmt                # Format code
 just clippy             # Run clippy on host (warnings are errors)
 just clippy-esp         # Run clippy for ESP32 target
-just check              # Run fmt + clippy + test (host only)
+just check              # Run fmt + clippy + test
 just check-all          # Run check + clippy-esp
 ```
 
