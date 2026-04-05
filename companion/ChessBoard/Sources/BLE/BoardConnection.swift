@@ -124,7 +124,7 @@ extension BLEDelegate: CBCentralManagerDelegate {
         _ central: CBCentralManager,
         didDiscover peripheral: CBPeripheral,
         advertisementData: [String: Any],
-        rssi RSSI: NSNumber
+        rssi rssiValue: NSNumber
     ) {
         central.stopScan()
         self.peripheral = peripheral
