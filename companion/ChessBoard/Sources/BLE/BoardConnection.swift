@@ -20,6 +20,9 @@ class BoardConnection {
     private(set) var whitePlayerType: PlayerType?
     private(set) var blackPlayerType: PlayerType?
 
+    let wifiManager = WifiManager()
+    let lichessManager = LichessManager()
+
     private let delegate: BLEDelegate
 
     init() {
@@ -48,15 +51,26 @@ class BoardConnection {
         }
     }
 
-    func configureAndStart(white: PlayerType, black: PlayerType) {
+    func configureAndStart(
+        white: PlayerType,
+        whiteLevel: Int = 0,
+        black: PlayerType,
+        blackLevel: Int = 0
+    ) {
         guard connectionState == .ready else { return }
 
         whitePlayerType = white
         blackPlayerType = black
         lastCommandResult = nil
 
-        delegate.write(white.encode(), to: GATT.whitePlayer)
-        delegate.write(black.encode(), to: GATT.blackPlayer)
+        delegate.write(
+            white.encode(level: whiteLevel),
+            to: GATT.whitePlayer
+        )
+        delegate.write(
+            black.encode(level: blackLevel),
+            to: GATT.blackPlayer
+        )
         delegate.write(Data(), to: GATT.startGame)
     }
 
@@ -125,6 +139,8 @@ extension BLEDelegate: CBCentralManagerDelegate {
     ) {
         owner?.connectionState = .discoveringServices
         peripheral.discoverServices(GATT.allServices)
+        owner?.wifiManager.attach(to: peripheral)
+        owner?.lichessManager.attach(to: peripheral)
     }
 
     func centralManager(
@@ -142,6 +158,8 @@ extension BLEDelegate: CBCentralManagerDelegate {
     ) {
         characteristics.removeAll()
         awaitingInitialState = false
+        owner?.wifiManager.reset()
+        owner?.lichessManager.reset()
         owner?.connectionState = .connecting
         central.connect(peripheral, options: nil)
     }
@@ -154,15 +172,25 @@ extension BLEDelegate: CBPeripheralDelegate {
     ) {
         guard let services = peripheral.services else { return }
         for service in services {
-            if service.uuid == GATT.gameService {
+            switch service.uuid {
+            case GATT.gameService:
                 peripheral.discoverCharacteristics(
                     GATT.gameCharacteristics,
                     for: service
                 )
+            case GATT.wifiService:
+                peripheral.discoverCharacteristics(
+                    GATT.wifiCharacteristics,
+                    for: service
+                )
+            case GATT.lichessService:
+                peripheral.discoverCharacteristics(
+                    GATT.lichessCharacteristics,
+                    for: service
+                )
+            default:
+                break
             }
-            // WiFi/Lichess services: discovered at service level but no
-            // characteristics fetched in Phase 1. Characteristic reads/writes
-            // on those services return ATT error 0x06 (Request Not Supported).
         }
     }
 
@@ -171,22 +199,36 @@ extension BLEDelegate: CBPeripheralDelegate {
         didDiscoverCharacteristicsFor service: CBService,
         error: Error?
     ) {
-        guard let chars = service.characteristics else { return }
-        for char in chars {
-            characteristics[char.uuid] = char
-
-            if char.uuid == GATT.gameState || char.uuid == GATT.commandResult {
-                peripheral.setNotifyValue(true, for: char)
+        switch service.uuid {
+        case GATT.gameService:
+            guard let chars = service.characteristics else {
+                return
             }
-        }
-
-        // Read initial game state once (for reconnect recovery).
-        // Transition to .ready happens in didUpdateValueFor when the read completes.
-        if let gs = characteristics[GATT.gameState], !awaitingInitialState,
-            owner?.connectionState != .ready
-        {
-            awaitingInitialState = true
-            peripheral.readValue(for: gs)
+            for char in chars {
+                characteristics[char.uuid] = char
+                if char.uuid == GATT.gameState
+                    || char.uuid == GATT.commandResult
+                {
+                    peripheral.setNotifyValue(true, for: char)
+                }
+            }
+            if let gs = characteristics[GATT.gameState],
+                !awaitingInitialState,
+                owner?.connectionState != .ready
+            {
+                awaitingInitialState = true
+                peripheral.readValue(for: gs)
+            }
+        case GATT.wifiService:
+            owner?.wifiManager.discoverCharacteristics(
+                for: service
+            )
+        case GATT.lichessService:
+            owner?.lichessManager.discoverCharacteristics(
+                for: service
+            )
+        default:
+            break
         }
     }
 
@@ -217,6 +259,26 @@ extension BLEDelegate: CBPeripheralDelegate {
             if let result = CommandResult.decode(data) {
                 owner?.lastCommandResult = result
             }
+        case GATT.wifiStatus:
+            owner?.wifiManager.handleNotification(data)
+        case GATT.lichessStatus:
+            owner?.lichessManager.handleNotification(data)
+        default:
+            break
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didWriteValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        if error == nil { return }
+        switch characteristic.uuid {
+        case GATT.wifiConfig:
+            owner?.wifiManager.handleWriteError()
+        case GATT.lichessToken:
+            owner?.lichessManager.handleWriteError()
         default:
             break
         }
