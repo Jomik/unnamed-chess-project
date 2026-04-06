@@ -34,4 +34,13 @@ enum KeychainStore {
         guard status == errSecSuccess else { return nil }
         return result as? Data
     }
+
+    static func delete(key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
 }
