@@ -1,0 +1,36 @@
+name: Swift CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  swift-checks:
+    name: Swift Checks
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: companion/ChessBoard
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [lint, test]
+        include:
+          - check: lint
+            run: swift-format lint --strict --recursive .
+          - check: test
+            run: |
+              xcodegen generate
+              xcodebuild test -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' -quiet
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      - name: Install tools
+        run: brew install swift-format xcodegen
+      - name: Create Local.xcconfig
+        run: touch Local.xcconfig
+      - name: ${{ matrix.check }}
+        run: ${{ matrix.run }}

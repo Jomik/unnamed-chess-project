@@ -1,4 +1,4 @@
-name: Continuous Integration
+name: Rust CI
 
 on:
   push:
@@ -18,14 +18,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        action:
-          - command: fmt
+        check: [fmt, clippy, test]
+        include:
+          - check: fmt
             args: --all -- --check --color always
-          - command: clippy
+          - check: clippy
             args: --all-targets --all-features --workspace --target x86_64-unknown-linux-gnu -- -D warnings
-          - command: build
-            args: --target x86_64-unknown-linux-gnu
-          - command: test
+          - check: test
             args: --target x86_64-unknown-linux-gnu
     steps:
       - name: Checkout repository
@@ -35,7 +34,7 @@ jobs:
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
       - name: Run command
-        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+        run: cargo ${{ matrix.check }} ${{ matrix.args }}
 
   esp-checks:
     name: ESP32 Checks
@@ -44,10 +43,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        action:
-          - command: +esp build
+        check: [build, clippy]
+        include:
+          - check: build
             args: --release --target xtensa-esp32s3-espidf
-          - command: +esp clippy
+          - check: clippy
             args: --all-targets --all-features --workspace -- -D warnings
     steps:
       - name: Checkout repository
@@ -61,4 +61,4 @@ jobs:
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
       - name: Run command
-        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+        run: cargo +esp ${{ matrix.check }} ${{ matrix.args }}
