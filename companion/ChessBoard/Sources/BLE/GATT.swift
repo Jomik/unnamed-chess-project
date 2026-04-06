@@ -33,10 +33,29 @@ enum GATT {
         string: "3d6343a2-3001-44ea-8fc2-3568d7216866"
     )
 
+    static let wifiConfig = CBUUID(
+        string: "3d6343a2-2002-44ea-8fc2-3568d7216866"
+    )
+    static let wifiStatus = CBUUID(
+        string: "3d6343a2-2003-44ea-8fc2-3568d7216866"
+    )
+
+    static let lichessToken = CBUUID(
+        string: "3d6343a2-3002-44ea-8fc2-3568d7216866"
+    )
+    static let lichessStatus = CBUUID(
+        string: "3d6343a2-3003-44ea-8fc2-3568d7216866"
+    )
+
     static let allServices = [gameService, wifiService, lichessService]
 
     static let gameCharacteristics: [CBUUID] = [
         whitePlayer, blackPlayer, startGame, matchControl, gameState,
         commandResult,
+    ]
+
+    static let wifiCharacteristics: [CBUUID] = [wifiConfig, wifiStatus]
+    static let lichessCharacteristics: [CBUUID] = [
+        lichessToken, lichessStatus,
     ]
 }
