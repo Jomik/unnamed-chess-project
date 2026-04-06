@@ -68,7 +68,7 @@ companion-build:
 [working-directory: 'companion/ChessBoard']
 companion-test:
     xcodegen generate
-    xcodebuild test -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.0' -quiet
+    xcodebuild test -project ChessBoard.xcodeproj -scheme ChessBoard -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.2' -quiet
 
 # Open companion iOS app in Xcode (for device deployment)
 [working-directory: 'companion/ChessBoard']
