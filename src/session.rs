@@ -2,7 +2,7 @@ use shakmaty::{Bitboard, ByColor, Chess, Color, Move, Position};
 
 use crate::ble_protocol::{GameState, GameStatus};
 use crate::feedback::{BoardFeedback, StatusKind, compute_feedback, compute_state_feedback};
-use crate::player::{Player, PlayerStatus};
+use crate::player::{GameAction, Player, PlayerStatus};
 
 #[derive(Debug, Clone)]
 pub struct TickResult {
@@ -41,9 +41,29 @@ impl GameSession {
         }
     }
 
-    /// Subsequent `tick()` calls short-circuit: the position is not advanced.
-    pub fn resign(&mut self, color: Color) {
+    /// Returns `true` if the resignation was accepted, `false` if rejected
+    /// (e.g. resigning on behalf of a non-interactive player).
+    pub fn resign(&mut self, color: Color) -> bool {
+        if self.is_game_over() {
+            return false;
+        }
+
+        let player = match color {
+            Color::White => &self.white,
+            Color::Black => &self.black,
+        };
+        if !player.is_interactive() {
+            log::warn!("Rejecting resign for non-interactive {color:?} player");
+            return false;
+        }
+
         self.resigned = Some(color);
+        let action = GameAction::Resign(color);
+        // Broadcast to both players. Currently all players inherit the
+        // default no-op; LichessOpponent will override this in a later task.
+        self.white.notify(&action);
+        self.black.notify(&action);
+        true
     }
 
     pub fn is_game_over(&self) -> bool {
@@ -546,7 +566,7 @@ mod tests {
         let (_sensor, mut session) = human_vs_human();
 
         assert!(!session.is_game_over(), "new game should not be over");
-        session.resign(Color::White);
+        assert!(session.resign(Color::White));
         assert!(
             session.is_game_over(),
             "game should be over after resignation"
@@ -569,7 +589,7 @@ mod tests {
         use crate::ble_protocol::GameStatus;
 
         let (_sensor, mut session) = human_vs_human();
-        session.resign(Color::Black);
+        assert!(session.resign(Color::Black));
 
         let state = session.game_state();
         assert_eq!(state.status, GameStatus::Resignation);
@@ -581,7 +601,7 @@ mod tests {
     fn tick_short_circuits_when_resigned() {
         let (mut sensor, mut session) = human_vs_human();
 
-        session.resign(Color::White);
+        assert!(session.resign(Color::White));
 
         // Even pushing a human move script should not advance the position.
         sensor.push_script("e2 We4.").unwrap();
@@ -595,6 +615,31 @@ mod tests {
             session.position().turn(),
             Color::White,
             "turn should not advance after resignation"
+        );
+    }
+
+    #[test]
+    fn resign_rejected_for_non_interactive_player() {
+        let (_sensor, mut session) = human_vs_engine();
+        // Black is EmbeddedEngine (non-interactive) — resign should be rejected
+        assert!(
+            !session.resign(Color::Black),
+            "resign should be rejected for non-interactive player"
+        );
+        assert!(
+            !session.is_game_over(),
+            "game should not be over after rejected resign"
+        );
+    }
+
+    #[test]
+    fn resign_rejected_when_game_already_over() {
+        let (_sensor, mut session) = human_vs_human();
+        assert!(session.resign(Color::White));
+        // Second resign should be rejected — game is already over
+        assert!(
+            !session.resign(Color::Black),
+            "resign should be rejected when game is already over"
         );
     }
 

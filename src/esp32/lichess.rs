@@ -213,6 +213,46 @@ impl Esp32LichessStreamImpl {
             }
         }
     }
+
+    /// POST to a Lichess Board API game endpoint with an empty body.
+    /// `path` is relative to `/api/board/game/{game_id}/` (e.g. `"move/e2e4"`, `"resign"`).
+    ///
+    /// Fresh connection per request. ESP-IDF's HTTP client has known bugs with connection reuse
+    /// after POST requests (esp-idf #5117, #17605). A fresh TLS handshake costs ~2s but is
+    /// completely reliable.
+    fn post_game_api(&self, path: &str) -> Result<(), Esp32LichessError> {
+        let config = HttpConfig {
+            timeout: Some(std::time::Duration::from_secs(10)),
+            crt_bundle_attach: Some(esp_crt_bundle_attach),
+            ..Default::default()
+        };
+
+        let mut client = HttpClient::wrap(
+            EspHttpConnection::new(&config).map_err(|e| Esp32LichessError::Http(e.to_string()))?,
+        );
+
+        let url = format!("{LICHESS_BASE}/api/board/game/{}/{path}", self.game_id);
+        let auth_header = format!("Bearer {}", self.post_token);
+        let headers = [
+            ("Authorization", auth_header.as_str()),
+            ("Content-Length", "0"),
+        ];
+
+        let request = client
+            .request(Method::Post, &url, &headers)
+            .map_err(|e| Esp32LichessError::Http(e.to_string()))?;
+
+        let response = request
+            .submit()
+            .map_err(|e| Esp32LichessError::Http(e.to_string()))?;
+
+        let status = response.status();
+        if status != 200 {
+            return Err(Esp32LichessError::Http(format!("{path} returned {status}")));
+        }
+
+        Ok(())
+    }
 }
 
 impl LichessStream for Esp32LichessStreamImpl {
@@ -236,44 +276,10 @@ impl LichessStream for Esp32LichessStreamImpl {
     }
 
     fn make_move(&mut self, uci_move: &str) -> Result<(), Esp32LichessError> {
-        // Fresh connection per move. ESP-IDF's HTTP client has known bugs
-        // with connection reuse after POST requests (esp-idf #5117, #17605).
-        // A fresh TLS handshake costs ~2s but is completely reliable.
-        let config = HttpConfig {
-            timeout: Some(std::time::Duration::from_secs(10)),
-            crt_bundle_attach: Some(esp_crt_bundle_attach),
-            ..Default::default()
-        };
+        self.post_game_api(&format!("move/{uci_move}"))
+    }
 
-        let mut client = HttpClient::wrap(
-            EspHttpConnection::new(&config).map_err(|e| Esp32LichessError::Http(e.to_string()))?,
-        );
-
-        let url = format!(
-            "{LICHESS_BASE}/api/board/game/{}/move/{uci_move}",
-            self.game_id
-        );
-        let auth_header = format!("Bearer {}", self.post_token);
-        let headers = [
-            ("Authorization", auth_header.as_str()),
-            ("Content-Length", "0"),
-        ];
-
-        let request = client
-            .request(Method::Post, &url, &headers)
-            .map_err(|e| Esp32LichessError::Http(e.to_string()))?;
-
-        let response = request
-            .submit()
-            .map_err(|e| Esp32LichessError::Http(e.to_string()))?;
-
-        let status = response.status();
-        if status != 200 {
-            return Err(Esp32LichessError::Http(format!(
-                "make_move returned {status}"
-            )));
-        }
-
-        Ok(())
+    fn resign(&mut self) -> Result<(), Esp32LichessError> {
+        self.post_game_api("resign")
     }
 }
