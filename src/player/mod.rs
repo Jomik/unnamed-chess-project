@@ -4,7 +4,19 @@ mod human;
 pub use embedded::EmbeddedEngine;
 pub use human::HumanPlayer;
 
-use shakmaty::{Bitboard, ByColor, Chess, Move};
+use shakmaty::{Bitboard, ByColor, Chess, Color, Move};
+
+/// A game-level action initiated by a player or the session.
+///
+/// These are "meta game" actions (resign, draw offers, takebacks) that
+/// players may need to forward to external services. The session broadcasts
+/// actions to both players via `Player::notify()`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GameAction {
+    /// A player resigned. Contains the color of the resigning player.
+    Resign(Color),
+    // Future: OfferDraw(Color), AcceptDraw(Color), RequestTakeback(Color), AcceptTakeback(Color)
+}
 
 /// Player health status, checked by the session each tick.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,4 +57,10 @@ pub trait Player {
     fn is_interactive(&self) -> bool {
         true
     }
+
+    /// Notification of a game-level action (resign, draw offer, etc.).
+    ///
+    /// Override for async players (e.g. Lichess) that need to forward
+    /// actions to an external service. Default is a no-op.
+    fn notify(&mut self, _action: &GameAction) {}
 }

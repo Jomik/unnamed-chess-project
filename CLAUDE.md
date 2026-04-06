@@ -85,7 +85,7 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 
 ### Module Responsibilities
 
-- **player/mod.rs** — `Player` trait (`poll_move`, `opponent_moved`, `is_interactive`), `PlayerStatus` enum
+- **player/mod.rs** — `Player` trait (`poll_move`, `opponent_moved`, `is_interactive`, `notify`), `PlayerStatus` enum, `GameAction` enum for game-level actions (resign, future draw/takeback)
 - **player/human.rs** — `HumanPlayer`: detects moves from sensor bitboards by matching against legal moves
 - **player/embedded.rs** — `EmbeddedEngine`: heuristic AI (captures > castling > promotions > random)
 - **feedback.rs** — `compute_feedback` and `compute_state_feedback`: feedback from position + sensors. Recovery guidance is integrated as a fallback path.
@@ -94,7 +94,7 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **esp32/sensor.rs** — `Esp32PieceSensor`: ADC + mux scanning, `RawScan` for raw millivolt readings, `read_raw()` primitive
 - **esp32/ble.rs** — `start_ble()` initializes NimBLE and returns `BleCommands` (command receiver) + `BleNotifier` (characteristic updater). Three fully functional GATT services (WiFi, Lichess, Game), typed characteristic handles.
 - **esp32/config.rs** — `SensorCalibration` NVS load/save (cal partition), `CalibrationError`, `SensorConfig`, `LedPalette`, `Rgb8` display/sensor configuration types
-- **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player`
+- **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player` with resign propagation via shared `AtomicBool` flag
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
 - **testutil/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
 

@@ -1,11 +1,13 @@
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::time::Duration;
 
 use shakmaty::uci::UciMove;
 use shakmaty::{Chess, Color, Move};
 
-use crate::player::{Player, PlayerStatus};
+use crate::player::{GameAction, Player, PlayerStatus};
 
 /// Timeout for worker startup. Must be longer than the stream connection timeout
 /// (60s in esp32/lichess.rs) to avoid false failures on slow networks.
@@ -134,6 +136,7 @@ pub trait LichessStream {
 
     fn next_event(&mut self) -> Option<Result<GameEvent, Self::Error>>;
     fn make_move(&mut self, uci_move: &str) -> Result<(), Self::Error>;
+    fn resign(&mut self) -> Result<(), Self::Error>;
 }
 
 /// Lichess opponent that communicates with a background worker via channels.
@@ -141,6 +144,7 @@ pub trait LichessStream {
 pub struct LichessOpponent {
     player_move_tx: SyncSender<String>,
     ai_move_rx: Receiver<LichessMessage>,
+    resign_flag: Arc<AtomicBool>,
     error: bool,
     game_over: bool,
 }
@@ -148,6 +152,14 @@ pub struct LichessOpponent {
 impl Player for LichessOpponent {
     fn is_interactive(&self) -> bool {
         false
+    }
+
+    fn notify(&mut self, action: &GameAction) {
+        match action {
+            GameAction::Resign(_) => {
+                self.resign_flag.store(true, Ordering::Release);
+            }
+        }
     }
 
     fn opponent_moved(&mut self, _position: &Chess, opponent_move: &Move) {
@@ -246,8 +258,11 @@ where
     let (ai_tx, ai_rx) = mpsc::sync_channel::<LichessMessage>(1);
     let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
 
+    let resign_flag = Arc::new(AtomicBool::new(false));
+    let worker_resign_flag = resign_flag.clone();
+
     let worker = Box::new(move || {
-        worker_loop(game, player_rx, ai_tx, ready_tx);
+        worker_loop(game, player_rx, ai_tx, ready_tx, worker_resign_flag);
     });
 
     spawn(worker).map_err(SpawnError::Spawn)?;
@@ -256,6 +271,7 @@ where
         Ok(Ok(())) => Ok(LichessOpponent {
             player_move_tx: player_tx,
             ai_move_rx: ai_rx,
+            resign_flag,
             error: false,
             game_over: false,
         }),
@@ -275,6 +291,7 @@ fn worker_loop<G: LichessGame>(
     player_rx: mpsc::Receiver<String>,
     ai_tx: mpsc::SyncSender<LichessMessage>,
     ready_tx: mpsc::SyncSender<Result<(), String>>,
+    resign_flag: Arc<AtomicBool>,
 ) {
     let mut stream = match game.into_stream() {
         Ok(s) => s,
@@ -305,9 +322,28 @@ fn worker_loop<G: LichessGame>(
     let mut expected_move_count = initial_move_count;
 
     loop {
+        // Check resign before blocking on player move
+        if resign_flag.load(Ordering::Acquire) {
+            if let Err(e) = stream.resign() {
+                log::warn!("Lichess resign failed: {e}");
+            }
+            let _ = ai_tx.send(LichessMessage::GameOver);
+            return;
+        }
+
         let player_uci = match player_rx.recv() {
             Ok(uci) => uci,
-            Err(_) => return,
+            Err(_) => {
+                // Channel closed — LichessOpponent was dropped.
+                // Check if it was due to resign.
+                if resign_flag.load(Ordering::Acquire) {
+                    if let Err(e) = stream.resign() {
+                        log::warn!("Lichess resign failed: {e}");
+                    }
+                    let _ = ai_tx.send(LichessMessage::GameOver);
+                }
+                return;
+            }
         };
 
         if let Err(e) = stream.make_move(&player_uci) {
@@ -318,6 +354,15 @@ fn worker_loop<G: LichessGame>(
         expected_move_count += 2;
 
         loop {
+            // Check resign between stream events
+            if resign_flag.load(Ordering::Acquire) {
+                if let Err(e) = stream.resign() {
+                    log::warn!("Lichess resign failed: {e}");
+                }
+                let _ = ai_tx.send(LichessMessage::GameOver);
+                return;
+            }
+
             match stream.next_event() {
                 Some(Ok(GameEvent::GameState(state)))
                 | Some(Ok(GameEvent::GameFull { state, .. })) => {
@@ -478,6 +523,10 @@ mod tests {
     use shakmaty::uci::UciMove;
     use shakmaty::{Bitboard, ByColor, Chess, Position};
     use std::str::FromStr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use crate::player::GameAction;
 
     fn empty_sensors() -> ByColor<Bitboard> {
         ByColor {
@@ -489,6 +538,7 @@ mod tests {
     struct MockStream {
         events: Vec<Result<GameEvent, String>>,
         moves_received: Vec<String>,
+        resigned: Arc<AtomicBool>,
     }
 
     impl LichessStream for MockStream {
@@ -506,11 +556,17 @@ mod tests {
             self.moves_received.push(uci_move.to_string());
             Ok(())
         }
+
+        fn resign(&mut self) -> Result<(), Self::Error> {
+            self.resigned.store(true, Ordering::Release);
+            Ok(())
+        }
     }
 
     struct MockGame {
         game_id: String,
         events: Vec<Result<GameEvent, String>>,
+        resigned: Arc<AtomicBool>,
     }
 
     impl LichessGame for MockGame {
@@ -524,6 +580,7 @@ mod tests {
             Ok(Box::new(MockStream {
                 events: self.events,
                 moves_received: vec![],
+                resigned: self.resigned,
             }))
         }
     }
@@ -586,6 +643,7 @@ mod tests {
             game: Some(MockGame {
                 game_id: "test1".into(),
                 events,
+                resigned: Arc::new(AtomicBool::new(false)),
             }),
         };
 
@@ -651,6 +709,7 @@ mod tests {
             game: Some(MockGame {
                 game_id: "test2".into(),
                 events,
+                resigned: Arc::new(AtomicBool::new(false)),
             }),
         };
 
@@ -713,6 +772,7 @@ mod tests {
             game: Some(MockGame {
                 game_id: "test3".into(),
                 events,
+                resigned: Arc::new(AtomicBool::new(false)),
             }),
         };
 
@@ -786,6 +846,47 @@ mod tests {
         assert!(
             opponent.status() != PlayerStatus::Error,
             "game over is not an error"
+        );
+    }
+
+    #[test]
+    fn resign_calls_stream_resign() {
+        let resigned = Arc::new(AtomicBool::new(false));
+        let events = vec![Ok(GameEvent::GameFull {
+            id: "resign-test".into(),
+            initial_fen: "startpos".into(),
+            state: GameStateData {
+                moves: String::new(),
+                status: GameStatus::Started,
+                winner: None,
+            },
+        })];
+
+        let client = MockClient {
+            game: Some(MockGame {
+                game_id: "resign-test".into(),
+                events,
+                resigned: resigned.clone(),
+            }),
+        };
+
+        let mut opponent =
+            spawn_lichess_opponent(client, default_config(), spawn_thread).expect("should spawn");
+
+        // Resign the game — sets the AtomicBool flag
+        opponent.notify(&GameAction::Resign(Color::White));
+
+        // Worker is blocked on player_rx.recv(). Dropping the opponent closes the
+        // channel, unblocking the worker. The worker then checks the resign flag
+        // and calls stream.resign().
+        drop(opponent);
+
+        // Give the worker thread time to process
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        assert!(
+            resigned.load(Ordering::Acquire),
+            "stream.resign() should have been called"
         );
     }
 

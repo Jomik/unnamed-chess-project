@@ -264,14 +264,21 @@ fn main() {
                 }
                 BleCommand::Resign { color } => {
                     if let Some(ref mut s) = session {
-                        log::info!("{color:?} resigns");
-                        s.resign(color);
-                        let state = s.game_state();
-                        notifier.notify_command_result(&CommandResult::success(
-                            CommandSource::MatchControl,
-                        ));
-                        notifier.notify_game_state(&state);
-                        prev_game_state = Some(state);
+                        if s.resign(color) {
+                            log::info!("{color:?} resigns");
+                            let state = s.game_state();
+                            notifier.notify_command_result(&CommandResult::success(
+                                CommandSource::MatchControl,
+                            ));
+                            notifier.notify_game_state(&state);
+                            prev_game_state = Some(state);
+                        } else {
+                            log::warn!("Resign rejected for {color:?}");
+                            notifier.notify_command_result(&CommandResult::error(
+                                CommandSource::MatchControl,
+                                "cannot resign for non-human player",
+                            ));
+                        }
                     } else {
                         log::warn!("Resign received but no game is active");
                         notifier.notify_command_result(&CommandResult::error(
