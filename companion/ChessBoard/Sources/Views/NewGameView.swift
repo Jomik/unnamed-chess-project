@@ -9,12 +9,10 @@ struct NewGameView: View {
     @State private var lichessLevel: Int = 4
     @State private var error: String?
 
-    // WiFi fields
     @State private var wifiSsid = ""
     @State private var wifiPassword = ""
     @State private var wifiAuthMode: WifiAuthMode = .wpa2
 
-    // Lichess field
     @State private var lichessToken = ""
     @State private var hasLoaded = false
 
@@ -23,12 +21,9 @@ struct NewGameView: View {
     }
 
     private var canStart: Bool {
-        if needsLichess {
-            return board.wifiManager.status.state == .connected
-                && board.lichessManager.status.state
-                    == .connected
-        }
-        return true
+        !needsLichess
+            || (board.wifiManager.status.state == .connected
+                && board.lichessManager.status.state == .connected)
     }
 
     var body: some View {
@@ -65,7 +60,6 @@ struct NewGameView: View {
             guard !hasLoaded else { return }
             hasLoaded = true
             loadPreferences()
-            autoConnectIfNeeded()
         }
         .onChange(of: needsLichess) {
             autoConnectIfNeeded()
@@ -77,7 +71,6 @@ struct NewGameView: View {
             if !result.ok {
                 error = result.message
             } else {
-                savePreferences()
                 dismiss()
             }
         }
@@ -234,6 +227,7 @@ struct NewGameView: View {
 
     private func startGame() {
         error = nil
+        savePreferences()
         let wl =
             whiteType == .lichessAi ? lichessLevel : 0
         let bl =
@@ -249,7 +243,7 @@ struct NewGameView: View {
     private func autoConnectIfNeeded() {
         guard needsLichess else { return }
 
-        // Auto-send WiFi credentials if disconnected and credentials exist
+        // Reconnect automatically so the user doesn't have to re-tap "Connect"
         if board.wifiManager.status.state == .disconnected
             && !wifiSsid.isEmpty
         {
@@ -260,7 +254,6 @@ struct NewGameView: View {
             )
         }
 
-        // Auto-send Lichess token if idle and token exists
         if board.lichessManager.status.state == .idle
             && !lichessToken.isEmpty
         {
@@ -268,10 +261,7 @@ struct NewGameView: View {
         }
     }
 
-    // MARK: - Persistence
-
     private func loadPreferences() {
-        // Keychain: WiFi credentials
         if let data = KeychainStore.load(
             key: "wifi_credentials"
         ),
@@ -285,7 +275,6 @@ struct NewGameView: View {
             wifiAuthMode = creds.authMode
         }
 
-        // Keychain: Lichess token
         if let data = KeychainStore.load(
             key: "lichess_token"
         ),
@@ -294,7 +283,6 @@ struct NewGameView: View {
             lichessToken = token
         }
 
-        // UserDefaults: last-used config
         let defaults = UserDefaults.standard
         if let raw = defaults.object(
             forKey: "chess_white_player"
@@ -321,7 +309,6 @@ struct NewGameView: View {
     }
 
     private func savePreferences() {
-        // UserDefaults
         let defaults = UserDefaults.standard
         defaults.set(
             Int(whiteType.rawValue),

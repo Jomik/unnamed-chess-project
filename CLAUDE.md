@@ -117,7 +117,7 @@ Used by `ScriptedSensor` in `testutil/script.rs` and extensively in `player/huma
 
 ## Provisioning
 
-On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE, sends WiFi credentials and Lichess API token each session (nothing persisted to NVS), and starts games. Only sensor calibration data is persisted to NVS (in the separate `cal` partition).
+On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE, sends WiFi credentials and Lichess API token each session (nothing persisted to NVS), and starts games. Only sensor calibration data is persisted to NVS (in the separate `cal` partition). The companion app persists WiFi credentials and Lichess token to the iOS Keychain, and last-used player config (type + level) to UserDefaults. Saved credentials are auto-sent on reconnect when a Lichess game is configured.
 
 `just erase-nvs` clears the main NVS partition. It does not affect sensor calibration.
 

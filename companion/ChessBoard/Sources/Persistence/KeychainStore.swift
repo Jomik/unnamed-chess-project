@@ -11,6 +11,7 @@ enum KeychainStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
         ]
+        // Delete any existing item first; SecItemAdd fails with errSecDuplicateItem otherwise.
         SecItemDelete(query as CFDictionary)
         var add = query
         add[kSecValueData as String] = data

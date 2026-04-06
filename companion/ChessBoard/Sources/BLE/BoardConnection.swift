@@ -74,9 +74,11 @@ class BoardConnection {
         delegate.write(Data(), to: GATT.startGame)
     }
 
+    /// Sends a resign command via Match Control.
+    ///
+    /// Wire format: `[action: u8 (0x00 = resign), color: u8]`
     func resign(color: Turn) {
         lastCommandResult = nil
-        // Match Control: [action=resign(0x00), color]
         delegate.write(Data([0x00, color.rawValue]), to: GATT.matchControl)
     }
 }
@@ -212,6 +214,7 @@ extension BLEDelegate: CBPeripheralDelegate {
                     peripheral.setNotifyValue(true, for: char)
                 }
             }
+            // Read current game state once after discovery to seed the UI before transitioning to .ready.
             if let gs = characteristics[GATT.gameState],
                 !awaitingInitialState,
                 owner?.connectionState != .ready
@@ -237,6 +240,8 @@ extension BLEDelegate: CBPeripheralDelegate {
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
+        // If the initial game-state read fails, transition to .ready anyway;
+        // the board will push state via notifications once a game starts.
         if error != nil {
             if awaitingInitialState {
                 awaitingInitialState = false
