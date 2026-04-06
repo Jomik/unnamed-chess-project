@@ -17,6 +17,7 @@ class LichessManager {
         guard let peripheral, let tokenChar else { return }
         let tokenBytes = Array(token.utf8)
         guard tokenBytes.count <= 255 else { return }
+        status = LichessStatus(state: .validating, message: "")
         var data = Data([UInt8(tokenBytes.count)])
         data.append(contentsOf: tokenBytes)
         peripheral.writeValue(

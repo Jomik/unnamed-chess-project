@@ -15,6 +15,9 @@ struct NewGameView: View {
 
     @State private var lichessToken = ""
     @State private var hasLoaded = false
+    @State private var isStarting = false
+    @State private var lichessTimeoutTask: Task<Void, Never>?
+    @State private var showResetConfirmation = false
 
     private var needsLichess: Bool {
         whiteType == .lichessAi || blackType == .lichessAi
@@ -24,6 +27,20 @@ struct NewGameView: View {
         !needsLichess
             || (board.wifiManager.status.state == .connected
                 && board.lichessManager.status.state == .connected)
+    }
+
+    private var startBlockedReason: String? {
+        guard needsLichess else { return nil }
+        let wifiReady = board.wifiManager.status.state == .connected
+        let lichessReady = board.lichessManager.status.state == .connected
+        switch (wifiReady, lichessReady) {
+        case (false, _):
+            return "Connect to WiFi first"
+        case (true, false):
+            return "Validate Lichess token first"
+        case (true, true):
+            return nil
+        }
     }
 
     var body: some View {
@@ -44,15 +61,40 @@ struct NewGameView: View {
                         systemImage: "exclamationmark.triangle"
                     )
                     .foregroundStyle(.red)
+                    Button("Retry") {
+                        startGame()
+                    }
                 }
             }
 
             Section {
-                Button("Start Game") {
+                Button {
                     startGame()
+                } label: {
+                    HStack {
+                        Text("Start Game")
+                        if isStarting {
+                            Spacer()
+                            ProgressView()
+                        }
+                    }
                 }
-                .disabled(!canStart)
+                .disabled(isStarting || !canStart)
+                if let reason = startBlockedReason {
+                    Text(reason)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
+
+            #if DEBUG
+                Section {
+                    Button("Reset Saved Data", role: .destructive) {
+                        resetSavedData()
+                        showResetConfirmation = true
+                    }
+                }
+            #endif
         }
         .navigationTitle("New Game")
         .animation(.default, value: needsLichess)
@@ -68,10 +110,16 @@ struct NewGameView: View {
             guard let result = board.lastCommandResult,
                 result.source == .startGame
             else { return }
+            isStarting = false
             if !result.ok {
                 error = result.message
             } else {
                 dismiss()
+            }
+        }
+        .onChange(of: board.connectionState) {
+            if board.connectionState != .ready {
+                isStarting = false
             }
         }
         .onChange(of: board.wifiManager.status.state) {
@@ -90,16 +138,32 @@ struct NewGameView: View {
             }
         }
         .onChange(of: board.lichessManager.status.state) {
-            if board.lichessManager.status.state == .connected {
-                if let data = lichessToken.data(
-                    using: .utf8
-                ) {
-                    KeychainStore.save(
-                        key: "lichess_token",
-                        data: data
+            // Timeout management
+            lichessTimeoutTask?.cancel()
+            lichessTimeoutTask = nil
+            if board.lichessManager.status.state == .validating {
+                lichessTimeoutTask = Task {
+                    try? await Task.sleep(for: .seconds(15))
+                    guard !Task.isCancelled else { return }
+                    board.lichessManager.status = LichessStatus(
+                        state: .failed,
+                        message: "Validation timed out"
                     )
                 }
             }
+
+            // Save token on success
+            if board.lichessManager.status.state == .connected {
+                if let data = lichessToken.data(using: .utf8) {
+                    KeychainStore.save(key: "lichess_token", data: data)
+                }
+            }
+        }
+        .onDisappear {
+            lichessTimeoutTask?.cancel()
+        }
+        .alert("Saved data cleared", isPresented: $showResetConfirmation) {
+            Button("OK", role: .cancel) {}
         }
     }
 
@@ -152,6 +216,14 @@ struct NewGameView: View {
                     systemImage: "wifi.exclamationmark"
                 )
                 .foregroundStyle(.red)
+                Button("Retry") {
+                    board.wifiManager.configure(
+                        ssid: wifiSsid,
+                        password: wifiPassword,
+                        authMode: wifiAuthMode
+                    )
+                }
+                .disabled(wifiSsid.isEmpty)
                 wifiFields
             case .disconnected:
                 wifiFields
@@ -167,6 +239,7 @@ struct NewGameView: View {
             .textInputAutocapitalization(.never)
         if wifiAuthMode != .open {
             SecureField("Password", text: $wifiPassword)
+                .textContentType(.none)
         }
         Picker("Security", selection: $wifiAuthMode) {
             Text("Open").tag(WifiAuthMode.open)
@@ -209,6 +282,10 @@ struct NewGameView: View {
                     systemImage: "exclamationmark.triangle"
                 )
                 .foregroundStyle(.red)
+                Button("Retry") {
+                    board.lichessManager.setToken(lichessToken)
+                }
+                .disabled(lichessToken.isEmpty)
                 lichessFields
             case .idle:
                 lichessFields
@@ -228,6 +305,11 @@ struct NewGameView: View {
     private func startGame() {
         error = nil
         savePreferences()
+        guard board.connectionState == .ready else {
+            error = "Board disconnected"
+            return
+        }
+        isStarting = true
         let wl =
             whiteType == .lichessAi ? lichessLevel : 0
         let bl =
@@ -323,4 +405,24 @@ struct NewGameView: View {
             forKey: "chess_lichess_level"
         )
     }
+
+    #if DEBUG
+        private func resetSavedData() {
+            KeychainStore.delete(key: "wifi_credentials")
+            KeychainStore.delete(key: "lichess_token")
+            let defaults = UserDefaults.standard
+            defaults.removeObject(forKey: "chess_white_player")
+            defaults.removeObject(forKey: "chess_black_player")
+            defaults.removeObject(forKey: "chess_lichess_level")
+            // Reset local state
+            wifiSsid = ""
+            wifiPassword = ""
+            wifiAuthMode = .wpa2
+            lichessToken = ""
+            whiteType = .human
+            blackType = .embedded
+            lichessLevel = 4
+            error = nil
+        }
+    #endif
 }

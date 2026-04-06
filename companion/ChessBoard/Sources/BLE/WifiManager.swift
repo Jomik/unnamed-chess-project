@@ -19,6 +19,7 @@ class WifiManager {
         authMode: WifiAuthMode
     ) {
         guard let peripheral, let configChar else { return }
+        status = WifiStatus(state: .connecting, message: "")
         let config = WifiConfig(
             ssid: ssid,
             password: password,
