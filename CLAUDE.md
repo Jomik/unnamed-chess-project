@@ -31,7 +31,7 @@ just companion-fmt     # Format Swift code (swift-format)
 just companion-lint    # Check Swift formatting (strict, errors on violations)
 ```
 
-Requires Xcode 15+, XcodeGen (`brew install xcodegen`), and swift-format (`brew install swift-format`). BLE does not work in the simulator — use a physical device for end-to-end testing.
+Requires Xcode 26+, XcodeGen (`brew install xcodegen`), and swift-format (`brew install swift-format`). BLE does not work in the simulator — use a physical device for end-to-end testing.
 
 For physical device deployment, copy `companion/ChessBoard/Local.xcconfig.template` to `Local.xcconfig` and set your `DEVELOPMENT_TEAM` ID.
 
@@ -46,6 +46,8 @@ just check-all          # Run check + clippy-esp
 ```
 
 CI treats clippy warnings as errors (`-D warnings`). **Never run `cargo +esp` directly** — always use `just` recipes, which load `IDF_PATH` from `.env` via `set dotenv-load`. Running `cargo +esp` without `IDF_PATH` corrupts the ESP-IDF setup.
+
+Swift CI (`.github/workflows/swift_ci.yml`) runs lint and build+test checks on every PR using the `macos-26` runner.
 
 ## Conditional Compilation
 
