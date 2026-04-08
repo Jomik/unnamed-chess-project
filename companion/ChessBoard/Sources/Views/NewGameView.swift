@@ -434,3 +434,65 @@ struct NewGameView: View {
         }
     #endif
 }
+
+#if DEBUG
+    #Preview("Idle") {
+        NavigationStack { NewGameView() }
+            .environment(BoardConnection(connectionState: .ready))
+    }
+    #Preview("WiFi Connecting") {
+        NavigationStack {
+            NewGameView()
+        }
+        .environment(
+            BoardConnection(
+                wifiStatus: WifiStatus(state: .connecting, message: "")
+            )
+        )
+    }
+    #Preview("WiFi Connected") {
+        NavigationStack {
+            NewGameView()
+        }
+        .environment(
+            BoardConnection(
+                wifiStatus: WifiStatus(state: .connected, message: "")
+            )
+        )
+    }
+    #Preview("WiFi Failed") {
+        NavigationStack {
+            NewGameView()
+        }
+        .environment(
+            BoardConnection(
+                wifiStatus: WifiStatus(
+                    state: .failed,
+                    message: "Connection timed out"
+                )
+            )
+        )
+    }
+    #Preview("Lichess Validating") {
+        NavigationStack {
+            NewGameView()
+        }
+        .environment(
+            BoardConnection(
+                wifiStatus: WifiStatus(state: .connected, message: ""),
+                lichessStatus: LichessStatus(state: .validating, message: "")
+            )
+        )
+    }
+    #Preview("Lichess Connected") {
+        NavigationStack {
+            NewGameView()
+        }
+        .environment(
+            BoardConnection(
+                wifiStatus: WifiStatus(state: .connected, message: ""),
+                lichessStatus: LichessStatus(state: .connected, message: "")
+            )
+        )
+    }
+#endif

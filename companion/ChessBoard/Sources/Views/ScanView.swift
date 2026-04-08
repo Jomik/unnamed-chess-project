@@ -92,3 +92,26 @@ struct ScanView: View {
         }
     }
 }
+
+#if DEBUG
+    #Preview("Scanning") {
+        NavigationStack { ScanView() }
+            .environment(BoardConnection(connectionState: .scanning))
+    }
+    #Preview("Not Found") {
+        NavigationStack { ScanView() }
+            .environment(BoardConnection(connectionState: .notFound))
+    }
+    #Preview("Connection Failed") {
+        NavigationStack { ScanView() }
+            .environment(BoardConnection(connectionState: .connectionFailed))
+    }
+    #Preview("Setup Failed") {
+        NavigationStack { ScanView() }
+            .environment(BoardConnection(connectionState: .setupFailed))
+    }
+    #Preview("Powered Off") {
+        NavigationStack { ScanView() }
+            .environment(BoardConnection(connectionState: .poweredOff))
+    }
+#endif

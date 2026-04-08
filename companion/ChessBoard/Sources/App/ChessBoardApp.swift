@@ -2,13 +2,7 @@ import SwiftUI
 
 @main
 struct ChessBoardApp: App {
-    @State private var board: BoardConnection = {
-        #if DEBUG && targetEnvironment(simulator)
-            BoardConnection(connectionState: .ready)
-        #else
-            BoardConnection()
-        #endif
-    }()
+    @State private var board = BoardConnection(transport: BLETransport())
 
     var body: some Scene {
         WindowGroup {

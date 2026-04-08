@@ -48,13 +48,7 @@ class BoardConnection {
 
     private var transport: BoardTransport?
 
-    init() {
-        let ble = BLETransport()
-        self.transport = ble
-        ble.owner = self
-    }
-
-    /// Testing initializer — accepts any BoardTransport.
+    /// Production initializer. Callers must provide the transport explicitly.
     init(transport: BoardTransport) {
         self.transport = transport
         transport.owner = self
@@ -62,8 +56,7 @@ class BoardConnection {
 
     #if DEBUG
         /// Creates a BoardConnection with pre-set state and no BLE transport.
-        /// Commands are no-ops (transport is nil). For use in #Preview macros
-        /// and Simulator builds.
+        /// Commands are no-ops (transport is nil). For use in #Preview macros.
         init(
             connectionState: ConnectionState = .ready,
             gameState: GameState = .initial,
