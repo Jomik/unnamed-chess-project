@@ -25,14 +25,14 @@ struct NewGameView: View {
 
     private var canStart: Bool {
         !needsLichess
-            || (board.wifiManager.status.state == .connected
-                && board.lichessManager.status.state == .connected)
+            || (board.wifiStatus.state == .connected
+                && board.lichessStatus.state == .connected)
     }
 
     private var startBlockedReason: String? {
         guard needsLichess else { return nil }
-        let wifiReady = board.wifiManager.status.state == .connected
-        let lichessReady = board.lichessManager.status.state == .connected
+        let wifiReady = board.wifiStatus.state == .connected
+        let lichessReady = board.lichessStatus.state == .connected
         switch (wifiReady, lichessReady) {
         case (false, _):
             return "Connect to WiFi first"
@@ -121,8 +121,8 @@ struct NewGameView: View {
                 isStarting = false
             }
         }
-        .onChange(of: board.wifiManager.status.state) {
-            if board.wifiManager.status.state == .connected {
+        .onChange(of: board.wifiStatus.state) {
+            if board.wifiStatus.state == .connected {
                 let creds = WifiCredentials(
                     ssid: wifiSsid,
                     password: wifiPassword,
@@ -136,15 +136,15 @@ struct NewGameView: View {
                 }
             }
         }
-        .onChange(of: board.lichessManager.status.state) {
+        .onChange(of: board.lichessStatus.state) {
             // Timeout management
             lichessTimeoutTask?.cancel()
             lichessTimeoutTask = nil
-            if board.lichessManager.status.state == .validating {
+            if board.lichessStatus.state == .validating {
                 lichessTimeoutTask = Task {
                     try? await Task.sleep(for: .seconds(15))
                     guard !Task.isCancelled else { return }
-                    board.lichessManager.status = LichessStatus(
+                    board.lichessStatus = LichessStatus(
                         state: .failed,
                         message: "Validation timed out"
                     )
@@ -152,7 +152,7 @@ struct NewGameView: View {
             }
 
             // Save token on success
-            if board.lichessManager.status.state == .connected {
+            if board.lichessStatus.state == .connected {
                 if let data = lichessToken.data(using: .utf8) {
                     KeychainStore.save(key: "lichess_token", data: data)
                 }
@@ -203,7 +203,7 @@ struct NewGameView: View {
     @ViewBuilder
     private var wifiSection: some View {
         Section("WiFi") {
-            switch board.wifiManager.status.state {
+            switch board.wifiStatus.state {
             case .connected:
                 Label(
                     "Connected to \(wifiSsid)",
@@ -218,14 +218,14 @@ struct NewGameView: View {
                 }
             case .failed:
                 Label(
-                    board.wifiManager.status.message.isEmpty
+                    board.wifiStatus.message.isEmpty
                         ? "Connection failed"
-                        : board.wifiManager.status.message,
+                        : board.wifiStatus.message,
                     systemImage: "wifi.exclamationmark"
                 )
                 .foregroundStyle(.red)
                 Button("Retry") {
-                    board.wifiManager.configure(
+                    board.configureWifi(
                         ssid: wifiSsid,
                         password: wifiPassword,
                         authMode: wifiAuthMode
@@ -255,7 +255,7 @@ struct NewGameView: View {
             Text("WPA3").tag(WifiAuthMode.wpa3)
         }
         Button("Connect") {
-            board.wifiManager.configure(
+            board.configureWifi(
                 ssid: wifiSsid,
                 password: wifiPassword,
                 authMode: wifiAuthMode
@@ -267,7 +267,7 @@ struct NewGameView: View {
     @ViewBuilder
     private var lichessSection: some View {
         Section("Lichess") {
-            switch board.lichessManager.status.state {
+            switch board.lichessStatus.state {
             case .connected:
                 Label(
                     "Lichess connected",
@@ -282,16 +282,16 @@ struct NewGameView: View {
                 }
             case .failed:
                 Label(
-                    board.lichessManager.status.message
+                    board.lichessStatus.message
                         .isEmpty
                         ? "Validation failed"
-                        : board.lichessManager.status
+                        : board.lichessStatus
                             .message,
                     systemImage: "exclamationmark.triangle"
                 )
                 .foregroundStyle(.red)
                 Button("Retry") {
-                    board.lichessManager.setToken(lichessToken)
+                    board.setLichessToken(lichessToken)
                 }
                 .disabled(lichessToken.isEmpty)
                 lichessFields
@@ -305,7 +305,7 @@ struct NewGameView: View {
     private var lichessFields: some View {
         SecureField("API Token", text: $lichessToken)
         Button("Validate") {
-            board.lichessManager.setToken(lichessToken)
+            board.setLichessToken(lichessToken)
         }
         .disabled(lichessToken.isEmpty)
     }
@@ -334,20 +334,20 @@ struct NewGameView: View {
         guard needsLichess else { return }
 
         // Reconnect automatically so the user doesn't have to re-tap "Connect"
-        if board.wifiManager.status.state == .disconnected
+        if board.wifiStatus.state == .disconnected
             && !wifiSsid.isEmpty
         {
-            board.wifiManager.configure(
+            board.configureWifi(
                 ssid: wifiSsid,
                 password: wifiPassword,
                 authMode: wifiAuthMode
             )
         }
 
-        if board.lichessManager.status.state == .idle
+        if board.lichessStatus.state == .idle
             && !lichessToken.isEmpty
         {
-            board.lichessManager.setToken(lichessToken)
+            board.setLichessToken(lichessToken)
         }
     }
 
