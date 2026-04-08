@@ -90,7 +90,6 @@ struct NewGameView: View {
             #if DEBUG
                 Section {
                     Button("Reset Saved Data", role: .destructive) {
-                        resetSavedData()
                         showResetConfirmation = true
                     }
                 }
@@ -162,8 +161,17 @@ struct NewGameView: View {
         .onDisappear {
             lichessTimeoutTask?.cancel()
         }
-        .alert("Saved data cleared", isPresented: $showResetConfirmation) {
-            Button("OK", role: .cancel) {}
+        .alert(
+            "Reset Saved Data?",
+            isPresented: $showResetConfirmation
+        ) {
+            Button("Reset", role: .destructive) {
+                resetSavedData()
+            }
+        } message: {
+            Text(
+                "This will clear all saved WiFi credentials, Lichess token, and player preferences."
+            )
         }
     }
 
