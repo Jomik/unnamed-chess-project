@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ActiveGameView: View {
     @Environment(BoardConnection.self) private var board
+    @State private var showResignConfirmation = false
 
     var body: some View {
         VStack(spacing: 32) {
@@ -26,10 +27,20 @@ struct ActiveGameView: View {
                 let color = board.resignColor
             {
                 Button("Resign", role: .destructive) {
-                    board.resign(color: color)
+                    showResignConfirmation = true
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .alert(
+                    "Resign Game?",
+                    isPresented: $showResignConfirmation
+                ) {
+                    Button("Resign", role: .destructive) {
+                        board.resign(color: color)
+                    }
+                } message: {
+                    Text("This will end the game as a loss.")
+                }
             }
 
             if board.gameState.isTerminal {
