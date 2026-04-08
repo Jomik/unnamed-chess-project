@@ -4,9 +4,32 @@ import Observation
 enum ConnectionState: Equatable {
     case poweredOff
     case scanning
+    case notFound
     case connecting
+    case connectionFailed
     case discoveringServices
+    case setupFailed
     case ready
+}
+
+extension ConnectionState {
+    var isTimeoutable: Bool {
+        switch self {
+        case .scanning, .connecting, .discoveringServices:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var isFailure: Bool {
+        switch self {
+        case .notFound, .connectionFailed, .setupFailed:
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 @Observable
@@ -81,6 +104,26 @@ class BoardConnection {
         lastCommandResult = nil
         delegate.write(Data([0x00, color.rawValue]), to: GATT.matchControl)
     }
+
+    func restartScanning() {
+        delegate.restartScanning()
+    }
+
+    func connectionTimedOut() {
+        switch connectionState {
+        case .scanning:
+            delegate.stopScanning()
+            connectionState = .notFound
+        case .connecting:
+            delegate.cancelConnection()
+            connectionState = .connectionFailed
+        case .discoveringServices:
+            delegate.cancelConnection()
+            connectionState = .setupFailed
+        default:
+            break
+        }
+    }
 }
 
 private class BLEDelegate: NSObject {
@@ -100,6 +143,27 @@ private class BLEDelegate: NSObject {
     func write(_ data: Data, to uuid: CBUUID) {
         guard let peripheral, let char = characteristics[uuid] else { return }
         peripheral.writeValue(data, for: char, type: .withResponse)
+    }
+
+    func restartScanning() {
+        centralManager.stopScan()
+        peripheral = nil
+        characteristics.removeAll()
+        startScanning()
+    }
+
+    func stopScanning() {
+        centralManager.stopScan()
+    }
+
+    func cancelConnection() {
+        guard let p = peripheral else { return }
+        // Clear state BEFORE asking CoreBluetooth to cancel, guaranteeing
+        // the delegate guards (didDisconnect / didFailToConnect) will see
+        // self.peripheral == nil and bail out.
+        peripheral = nil
+        characteristics.removeAll()
+        centralManager.cancelPeripheralConnection(p)
     }
 
     private func startScanning() {
@@ -150,6 +214,9 @@ extension BLEDelegate: CBCentralManagerDelegate {
         didFailToConnect peripheral: CBPeripheral,
         error: Error?
     ) {
+        // cancelConnection() nils self.peripheral before this callback fires.
+        // If nil, the cancellation was intentional — don't restart scanning.
+        guard self.peripheral != nil else { return }
         startScanning()
     }
 
@@ -158,6 +225,9 @@ extension BLEDelegate: CBCentralManagerDelegate {
         didDisconnectPeripheral peripheral: CBPeripheral,
         error: Error?
     ) {
+        // cancelConnection() nils self.peripheral before this callback fires.
+        // If nil, the disconnect was intentional — don't auto-reconnect.
+        guard self.peripheral != nil else { return }
         characteristics.removeAll()
         awaitingInitialState = false
         owner?.wifiManager.reset()
