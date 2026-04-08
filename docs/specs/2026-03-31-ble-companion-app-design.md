@@ -258,6 +258,10 @@ SwiftUI + CoreBluetooth. No third-party dependencies.
 
 ```
 Not connected → ScanView (scanning animation, auto-connects on discovery)
+  ├─ Timeout (20s) → failure UI (Retry → restart scan)
+  │   ├─ Scan timeout → "Board not found"
+  │   ├─ Connect timeout → "Connection failed"
+  │   └─ Setup timeout → "Setup failed"
   │
   └─ Connected, idle (0x00) → NewGameView
        ├─ White Player config (type picker + type-specific fields)
