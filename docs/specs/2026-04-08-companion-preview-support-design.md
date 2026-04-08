@@ -154,14 +154,12 @@ Views access `board.wifiStatus` instead of `board.wifiManager.status`. This is o
 
 ```swift
 func configureWifi(ssid: String, password: String, authMode: WifiAuthMode) {
-    guard transport != nil else { return }
     wifiStatus = WifiStatus(state: .connecting, message: "")
     let config = WifiConfig(ssid: ssid, password: password, authMode: authMode)
     transport?.write(config.encode(), to: GATT.wifiConfig)
 }
 
 func setLichessToken(_ token: String) {
-    guard transport != nil else { return }
     let tokenBytes = Array(token.utf8)
     guard tokenBytes.count <= 255 else { return }
     lichessStatus = LichessStatus(state: .validating, message: "")
