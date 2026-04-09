@@ -1,0 +1,255 @@
+import CoreBluetooth
+
+final class BLETransport: NSObject, BoardTransport,
+    CBCentralManagerDelegate, CBPeripheralDelegate
+{
+    weak var owner: BoardConnection?
+
+    private var centralManager: CBCentralManager!
+    private var peripheral: CBPeripheral?
+    private var characteristics: [CBUUID: CBCharacteristic] = [:]
+    private var awaitingInitialState = false
+
+    override init() {
+        super.init()
+        // queue: nil → main queue. This is load-bearing for @Observable.
+        centralManager = CBCentralManager(delegate: self, queue: nil)
+    }
+
+    func write(_ data: Data, to uuid: CBUUID) {
+        guard let peripheral, let char = characteristics[uuid] else { return }
+        peripheral.writeValue(data, for: char, type: .withResponse)
+    }
+
+    func restartScanning() {
+        centralManager.stopScan()
+        peripheral = nil
+        characteristics.removeAll()
+        startScanning()
+    }
+
+    func stopScanning() {
+        centralManager.stopScan()
+    }
+
+    func cancelConnection() {
+        guard let p = peripheral else { return }
+        // Clear state BEFORE asking CoreBluetooth to cancel, guaranteeing
+        // the delegate guards (didDisconnect / didFailToConnect) will see
+        // self.peripheral == nil and bail out.
+        peripheral = nil
+        characteristics.removeAll()
+        centralManager.cancelPeripheralConnection(p)
+    }
+
+    private func startScanning() {
+        guard centralManager.state == .poweredOn else { return }
+        owner?.connectionState = .scanning
+        centralManager.scanForPeripherals(
+            withServices: [GATT.gameService],
+            options: nil
+        )
+    }
+
+    // MARK: - CBCentralManagerDelegate
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        switch central.state {
+        case .poweredOn:
+            startScanning()
+        default:
+            owner?.connectionState = .poweredOff
+        }
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        didDiscover peripheral: CBPeripheral,
+        advertisementData: [String: Any],
+        rssi rssiValue: NSNumber
+    ) {
+        central.stopScan()
+        self.peripheral = peripheral
+        peripheral.delegate = self
+        central.connect(peripheral, options: nil)
+        owner?.connectionState = .connecting
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        didConnect peripheral: CBPeripheral
+    ) {
+        owner?.connectionState = .discoveringServices
+        peripheral.discoverServices(GATT.allServices)
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        didFailToConnect peripheral: CBPeripheral,
+        error: Error?
+    ) {
+        // cancelConnection() nils self.peripheral before this callback fires.
+        // If nil, the cancellation was intentional — don't restart scanning.
+        guard self.peripheral != nil else { return }
+        startScanning()
+    }
+
+    func centralManager(
+        _ central: CBCentralManager,
+        didDisconnectPeripheral peripheral: CBPeripheral,
+        error: Error?
+    ) {
+        // cancelConnection() nils self.peripheral before this callback fires.
+        // If nil, the disconnect was intentional — don't auto-reconnect.
+        guard self.peripheral != nil else { return }
+        characteristics.removeAll()
+        awaitingInitialState = false
+        owner?.wifiStatus = .disconnected
+        owner?.lichessStatus = .idle
+        owner?.connectionState = .connecting
+        central.connect(peripheral, options: nil)
+    }
+
+    // MARK: - CBPeripheralDelegate
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverServices error: Error?
+    ) {
+        guard let services = peripheral.services else { return }
+        for service in services {
+            switch service.uuid {
+            case GATT.gameService:
+                peripheral.discoverCharacteristics(
+                    GATT.gameCharacteristics,
+                    for: service
+                )
+            case GATT.wifiService:
+                peripheral.discoverCharacteristics(
+                    GATT.wifiCharacteristics,
+                    for: service
+                )
+            case GATT.lichessService:
+                peripheral.discoverCharacteristics(
+                    GATT.lichessCharacteristics,
+                    for: service
+                )
+            default:
+                break
+            }
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverCharacteristicsFor service: CBService,
+        error: Error?
+    ) {
+        switch service.uuid {
+        case GATT.gameService:
+            guard let chars = service.characteristics else {
+                return
+            }
+            for char in chars {
+                characteristics[char.uuid] = char
+                if char.uuid == GATT.gameState
+                    || char.uuid == GATT.commandResult
+                {
+                    peripheral.setNotifyValue(true, for: char)
+                }
+            }
+            // Read current game state once after discovery to seed the UI before transitioning to .ready.
+            if let gs = characteristics[GATT.gameState],
+                !awaitingInitialState,
+                owner?.connectionState != .ready
+            {
+                awaitingInitialState = true
+                peripheral.readValue(for: gs)
+            }
+        case GATT.wifiService:
+            guard let chars = service.characteristics else { return }
+            for char in chars {
+                characteristics[char.uuid] = char
+                if char.uuid == GATT.wifiStatus {
+                    peripheral.setNotifyValue(true, for: char)
+                    peripheral.readValue(for: char)
+                }
+            }
+        case GATT.lichessService:
+            guard let chars = service.characteristics else { return }
+            for char in chars {
+                characteristics[char.uuid] = char
+                if char.uuid == GATT.lichessStatus {
+                    peripheral.setNotifyValue(true, for: char)
+                    peripheral.readValue(for: char)
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        // If the initial game-state read fails, transition to .ready anyway;
+        // the board will push state via notifications once a game starts.
+        if error != nil {
+            if awaitingInitialState {
+                awaitingInitialState = false
+                owner?.connectionState = .ready
+            }
+            return
+        }
+        guard let data = characteristic.value else { return }
+        switch characteristic.uuid {
+        case GATT.gameState:
+            if let state = GameState.decode(data) {
+                owner?.gameState = state
+            }
+            // Transition to .ready after we have actual game state
+            if awaitingInitialState {
+                awaitingInitialState = false
+                owner?.connectionState = .ready
+            }
+        case GATT.commandResult:
+            if let result = CommandResult.decode(data) {
+                owner?.lastCommandResult = result
+            }
+        case GATT.wifiStatus:
+            if let decoded = WifiStatus.decode(data) {
+                owner?.wifiStatus = decoded
+            }
+        case GATT.lichessStatus:
+            if let decoded = LichessStatus.decode(data) {
+                owner?.lichessStatus = decoded
+            }
+        default:
+            break
+        }
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didWriteValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        if error == nil { return }
+        switch characteristic.uuid {
+        case GATT.wifiConfig:
+            owner?.wifiStatus = WifiStatus(
+                state: .failed,
+                message: "Write failed"
+            )
+        case GATT.lichessToken:
+            owner?.lichessStatus = LichessStatus(
+                state: .failed,
+                message: "Write failed"
+            )
+        default:
+            break
+        }
+    }
+}

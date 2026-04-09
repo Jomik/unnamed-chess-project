@@ -93,3 +93,46 @@ struct ActiveGameView: View {
         }
     }
 }
+
+#if DEBUG
+    #Preview("Awaiting Pieces") {
+        NavigationStack { ActiveGameView() }
+            .environment(
+                BoardConnection(
+                    gameState: GameState(status: .awaitingPieces, turn: .white)
+                )
+            )
+    }
+    #Preview("In Progress") {
+        NavigationStack { ActiveGameView() }
+            .environment(
+                BoardConnection(
+                    gameState: GameState(status: .inProgress, turn: .white)
+                )
+            )
+    }
+    #Preview("Checkmate") {
+        NavigationStack { ActiveGameView() }
+            .environment(
+                BoardConnection(
+                    gameState: GameState(status: .checkmate, turn: .black)
+                )
+            )
+    }
+    #Preview("Resignation") {
+        NavigationStack { ActiveGameView() }
+            .environment(
+                BoardConnection(
+                    gameState: GameState(status: .resignation, turn: .white)
+                )
+            )
+    }
+    #Preview("Stalemate") {
+        NavigationStack { ActiveGameView() }
+            .environment(
+                BoardConnection(
+                    gameState: GameState(status: .stalemate, turn: .white)
+                )
+            )
+    }
+#endif

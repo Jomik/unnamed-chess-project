@@ -17,3 +17,22 @@ struct ContentView: View {
         }
     }
 }
+
+#if DEBUG
+    #Preview("Ready - New Game") {
+        ContentView()
+            .environment(BoardConnection(connectionState: .ready))
+    }
+    #Preview("Scanning") {
+        ContentView()
+            .environment(BoardConnection(connectionState: .scanning))
+    }
+    #Preview("In Progress") {
+        ContentView()
+            .environment(
+                BoardConnection(
+                    gameState: GameState(status: .inProgress, turn: .white)
+                )
+            )
+    }
+#endif
