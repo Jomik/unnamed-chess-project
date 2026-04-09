@@ -288,7 +288,7 @@ A single `BoardConnection` class wraps CoreBluetooth and exposes observable stat
 
 ### Reconnection
 
-If BLE disconnects, the app re-initiates connection from the `didDisconnectPeripheral` delegate callback by calling `centralManager.connect` again. On reconnect, the app reads current Game State, WiFi Status, and Lichess Status. The firmware retains WiFi and Lichess status across BLE reconnections (only Command Result is reset on reconnect). Navigation is driven reactively by the observable `gameState` — once `connectionState` reaches `.ready`, `ContentView` displays `NewGameView` when status is idle (0x00), or `ActiveGameView` for any other status (0x01–0x06). No explicit navigation action is required on reconnect.
+If BLE disconnects, the app re-initiates connection from the `didDisconnectPeripheral` delegate callback by calling `centralManager.connect` again. On reconnect, the app reads current Game State, White Player, Black Player, WiFi Status, and Lichess Status. The firmware retains WiFi and Lichess status across BLE reconnections (only Command Result is reset on reconnect). Navigation is driven reactively by the observable `gameState` — once `connectionState` reaches `.ready`, `ContentView` displays `NewGameView` when status is idle (0x00), or `ActiveGameView` for any other status (0x01–0x06). No explicit navigation action is required on reconnect.
 
 If WiFi drops during an active Lichess game, the board's Lichess connection breaks and the game ends via the board's game state transition (the firmware moves to a terminal status). The app surfaces this through the existing Game State notification path — no WiFi-specific UI is needed in ActiveGameView.
 

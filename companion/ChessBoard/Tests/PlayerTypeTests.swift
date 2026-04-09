@@ -37,4 +37,24 @@ final class PlayerTypeTests: XCTestCase {
             Data([0x02, 0x04])
         )
     }
+
+    func testDecodeHuman() {
+        XCTAssertEqual(PlayerType.decode(Data([0x00])), .human)
+    }
+
+    func testDecodeEmbedded() {
+        XCTAssertEqual(PlayerType.decode(Data([0x01])), .embedded)
+    }
+
+    func testDecodeLichessAi() {
+        XCTAssertEqual(PlayerType.decode(Data([0x02, 4])), .lichessAi)
+    }
+
+    func testDecodeUnset() {
+        XCTAssertNil(PlayerType.decode(Data([0xFF])))
+    }
+
+    func testDecodeEmpty() {
+        XCTAssertNil(PlayerType.decode(Data()))
+    }
 }
