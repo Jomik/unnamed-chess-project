@@ -1,7 +1,7 @@
 use shakmaty::{Bitboard, ByColor, Chess, Color, Move, Position};
 
 use crate::board_api::GameStatus;
-use crate::feedback::{BoardFeedback, StatusKind, compute_feedback, compute_state_feedback};
+use crate::feedback::{compute_feedback, compute_state_feedback, BoardFeedback, StatusKind};
 use crate::player::{GameAction, Player, PlayerStatus};
 
 #[derive(Debug, Clone)]
@@ -67,7 +67,7 @@ impl GameSession {
     }
 
     pub fn is_game_over(&self) -> bool {
-        self.resigned.is_some() || self.position.legal_moves().is_empty()
+        self.game_state().is_terminal()
     }
 
     pub fn game_state(&self) -> GameStatus {
