@@ -1,6 +1,7 @@
 use shakmaty::{Bitboard, ByColor};
 
 pub mod ble_protocol;
+pub mod board_api;
 pub mod feedback;
 pub mod lichess;
 pub mod player;

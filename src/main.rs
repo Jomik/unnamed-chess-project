@@ -6,16 +6,16 @@ fn main() {
     use esp_idf_svc::hal::peripherals::Peripherals;
     use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvsPartition, NvsCustom};
     use esp_idf_svc::wifi::AuthMethod;
-    use shakmaty::Color;
+    use shakmaty::{Color, Position};
     use unnamed_chess_project::ble_protocol::{
         BleCommand, CommandResult, CommandSource, GameState, GameStatus, LichessStatus,
-        PlayerConfig, UNSET_BYTE, WifiAuthMode, WifiStatus,
+        PlayerConfig, WifiAuthMode, WifiStatus, UNSET_BYTE,
     };
     use unnamed_chess_project::esp32::config::{LedPalette, SensorCalibration, SensorConfig};
     use unnamed_chess_project::esp32::{
-        Esp32LedDisplay, Esp32LichessClient, Esp32PieceSensor, WifiConnection, start_ble,
+        start_ble, Esp32LedDisplay, Esp32LichessClient, Esp32PieceSensor, WifiConnection,
     };
-    use unnamed_chess_project::lichess::{LichessConfig, spawn_lichess_opponent};
+    use unnamed_chess_project::lichess::{spawn_lichess_opponent, LichessConfig};
     use unnamed_chess_project::session::GameSession;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
 
@@ -253,9 +253,10 @@ fn main() {
                         };
 
                     let new_session = GameSession::new(white_player, black_player);
-                    let state = new_session.game_state();
-                    notifier.notify_game_state(&state);
-                    prev_game_state = Some(state);
+                    let status = new_session.game_state();
+                    let ble_state = to_ble_game_state(&status, new_session.position().turn());
+                    notifier.notify_game_state(&ble_state);
+                    prev_game_state = Some(ble_state);
 
                     session = Some(new_session);
                     prev_positions = Some(initial_positions);
@@ -266,12 +267,13 @@ fn main() {
                     if let Some(ref mut s) = session {
                         if s.resign(color) {
                             log::info!("{color:?} resigns");
-                            let state = s.game_state();
+                            let status = s.game_state();
+                            let ble_state = to_ble_game_state(&status, s.position().turn());
                             notifier.notify_command_result(&CommandResult::success(
                                 CommandSource::MatchControl,
                             ));
-                            notifier.notify_game_state(&state);
-                            prev_game_state = Some(state);
+                            notifier.notify_game_state(&ble_state);
+                            prev_game_state = Some(ble_state);
                         } else {
                             log::warn!("Resign rejected for {color:?}");
                             notifier.notify_command_result(&CommandResult::error(
@@ -355,16 +357,17 @@ fn main() {
                 log::warn!("LED update failed: {e}");
             }
 
-            let current_state = s.game_state();
-            let state_changed = prev_game_state.as_ref() != Some(&current_state);
+            let current_status = s.game_state();
+            let current_ble_state = to_ble_game_state(&current_status, s.position().turn());
+            let state_changed = prev_game_state.as_ref() != Some(&current_ble_state);
             if state_changed {
-                notifier.notify_game_state(&current_state);
-                prev_game_state = Some(current_state);
+                notifier.notify_game_state(&current_ble_state);
+                prev_game_state = Some(current_ble_state);
             }
 
             if s.is_game_over() {
-                let final_state = s.game_state();
-                log::info!("Game over: {:?}", final_state.status);
+                let final_status = s.game_state();
+                log::info!("Game over: {:?}", final_status);
 
                 session = None;
                 white_config = None;
@@ -378,6 +381,28 @@ fn main() {
         }
 
         FreeRtos::delay_ms(50);
+    }
+}
+
+#[cfg(target_os = "espidf")]
+fn to_ble_game_state(
+    status: &unnamed_chess_project::board_api::GameStatus,
+    turn: shakmaty::Color,
+) -> unnamed_chess_project::ble_protocol::GameState {
+    use unnamed_chess_project::ble_protocol::{GameState, GameStatus as BleGameStatus};
+    use unnamed_chess_project::board_api::GameStatus;
+
+    let ble_status = match status {
+        GameStatus::Idle => BleGameStatus::Idle,
+        GameStatus::AwaitingPieces => BleGameStatus::AwaitingPieces,
+        GameStatus::InProgress => BleGameStatus::InProgress,
+        GameStatus::Checkmate { .. } => BleGameStatus::Checkmate,
+        GameStatus::Stalemate => BleGameStatus::Stalemate,
+        GameStatus::Resigned { .. } => BleGameStatus::Resignation,
+    };
+    GameState {
+        status: ble_status,
+        turn,
     }
 }
 

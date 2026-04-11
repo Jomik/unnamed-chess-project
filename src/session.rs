@@ -1,6 +1,6 @@
 use shakmaty::{Bitboard, ByColor, Chess, Color, Move, Position};
 
-use crate::ble_protocol::{GameState, GameStatus};
+use crate::board_api::GameStatus;
 use crate::feedback::{BoardFeedback, StatusKind, compute_feedback, compute_state_feedback};
 use crate::player::{GameAction, Player, PlayerStatus};
 
@@ -70,23 +70,22 @@ impl GameSession {
         self.resigned.is_some() || self.position.legal_moves().is_empty()
     }
 
-    pub fn game_state(&self) -> GameState {
+    pub fn game_state(&self) -> GameStatus {
+        if let Some(color) = self.resigned {
+            return GameStatus::Resigned { color };
+        }
         let legal_moves = self.position.legal_moves();
-        let status = if self.resigned.is_some() {
-            GameStatus::Resignation
-        } else if legal_moves.is_empty() {
+        if legal_moves.is_empty() {
             if self.position.is_check() {
-                GameStatus::Checkmate
+                GameStatus::Checkmate {
+                    loser: self.position.turn(),
+                }
             } else {
                 GameStatus::Stalemate
             }
         } else {
             GameStatus::InProgress
-        };
-
-        let turn = self.position.turn();
-
-        GameState { status, turn }
+        }
     }
 
     pub fn tick(&mut self, sensors: ByColor<Bitboard>) -> TickResult {
@@ -575,26 +574,28 @@ mod tests {
 
     #[test]
     fn game_state_in_progress_for_new_session() {
-        use crate::ble_protocol::GameStatus;
+        use crate::board_api::GameStatus;
 
         let (_sensor, session) = human_vs_human();
         let state = session.game_state();
 
-        assert_eq!(state.status, GameStatus::InProgress);
-        assert_eq!(state.turn, Color::White);
+        assert_eq!(state, GameStatus::InProgress);
     }
 
     #[test]
     fn game_state_resignation_after_resign() {
-        use crate::ble_protocol::GameStatus;
+        use crate::board_api::GameStatus;
 
         let (_sensor, mut session) = human_vs_human();
         assert!(session.resign(Color::Black));
 
         let state = session.game_state();
-        assert_eq!(state.status, GameStatus::Resignation);
-        // Turn should still reflect the current (unmodified) position.
-        assert_eq!(state.turn, Color::White);
+        assert_eq!(
+            state,
+            GameStatus::Resigned {
+                color: Color::Black
+            }
+        );
     }
 
     #[test]
@@ -645,7 +646,7 @@ mod tests {
 
     #[test]
     fn game_state_checkmate() {
-        use crate::ble_protocol::GameStatus;
+        use crate::board_api::GameStatus;
 
         // Fool's mate: white is checkmated
         let fen = "rnb1kbnr/pppp1ppp/4p3/8/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3";
@@ -672,20 +673,17 @@ mod tests {
         );
         let state = session.game_state();
         assert_eq!(
-            state.status,
-            GameStatus::Checkmate,
-            "game_state should report Checkmate status"
-        );
-        assert_eq!(
-            state.turn,
-            Color::White,
-            "turn should be white (checkmated side)"
+            state,
+            GameStatus::Checkmate {
+                loser: Color::White
+            },
+            "game_state should report Checkmate with white as loser"
         );
     }
 
     #[test]
     fn game_state_stalemate() {
-        use crate::ble_protocol::GameStatus;
+        use crate::board_api::GameStatus;
 
         // Classic stalemate: black king trapped, no legal moves, not in check
         let fen = "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1";
@@ -721,14 +719,9 @@ mod tests {
         );
         let state = session.game_state();
         assert_eq!(
-            state.status,
+            state,
             GameStatus::Stalemate,
             "game_state should report Stalemate status"
-        );
-        assert_eq!(
-            state.turn,
-            Color::Black,
-            "turn should be black (stalemated side)"
         );
     }
 }
