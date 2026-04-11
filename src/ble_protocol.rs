@@ -1,21 +1,17 @@
 use shakmaty::Color;
 
+use crate::board_api;
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ProtocolError {
     #[error("unknown player type byte: 0x{0:02x}")]
     UnknownPlayerType(u8),
     #[error("insufficient data: need {needed} bytes, got {got}")]
     InsufficientData { needed: usize, got: usize },
-    #[error("Lichess AI level {0} is out of range (must be 1–8)")]
-    LevelOutOfRange(u8),
     #[error("unknown match control action byte: 0x{0:02x}")]
     UnknownAction(u8),
     #[error("unknown color byte: 0x{0:02x}")]
     UnknownColor(u8),
-    #[error("unknown auth mode byte: 0x{0:02x}")]
-    UnknownAuthMode(u8),
-    #[error("empty Lichess token")]
-    EmptyToken,
 }
 
 /// Sentinel byte indicating a player slot has not yet been configured.
@@ -25,111 +21,119 @@ pub enum ProtocolError {
 /// holds this value.
 pub const UNSET_BYTE: u8 = 0xFF;
 
-/// The type of player assigned to a side.
+// ---------------------------------------------------------------------------
+// PlayerType encoding
+// ---------------------------------------------------------------------------
+
+/// Encode a [`board_api::PlayerType`] to its wire byte.
+pub fn encode_player_type(pt: board_api::PlayerType) -> u8 {
+    match pt {
+        board_api::PlayerType::Human => 0x00,
+        board_api::PlayerType::Remote => 0x01,
+    }
+}
+
+/// Decode a wire byte into a [`board_api::PlayerType`].
+pub fn decode_player_type(byte: u8) -> Result<board_api::PlayerType, ProtocolError> {
+    match byte {
+        0x00 => Ok(board_api::PlayerType::Human),
+        0x01 => Ok(board_api::PlayerType::Remote),
+        other => Err(ProtocolError::UnknownPlayerType(other)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Color helpers
+// ---------------------------------------------------------------------------
+
+/// Parse a color byte: `0x00` = white, `0x01` = black.
+pub fn parse_color(byte: u8) -> Result<Color, ProtocolError> {
+    match byte {
+        0x00 => Ok(Color::White),
+        0x01 => Ok(Color::Black),
+        other => Err(ProtocolError::UnknownColor(other)),
+    }
+}
+
+/// Encode a color: white = `0x00`, black = `0x01`.
+pub fn encode_color(color: Color) -> u8 {
+    match color {
+        Color::White => 0x00,
+        Color::Black => 0x01,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GameStatus encoding
+// ---------------------------------------------------------------------------
+
+/// Encode a [`board_api::GameStatus`] to its wire bytes.
 ///
-/// Wire encoding (tagged binary):
-/// - Human:           `[0x00]`
-/// - Embedded Engine: `[0x01]`
-/// - Lichess AI:      `[0x02] [level: u8 (1–8)]`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlayerConfig {
-    Human,
-    Embedded,
-    LichessAi { level: u8 },
-}
-
-impl PlayerConfig {
-    pub fn encode(&self) -> Vec<u8> {
-        match self {
-            PlayerConfig::Human => vec![0x00],
-            PlayerConfig::Embedded => vec![0x01],
-            PlayerConfig::LichessAi { level } => vec![0x02, *level],
-        }
-    }
-
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        if bytes.is_empty() {
-            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
-        }
-        match bytes[0] {
-            0x00 => Ok(PlayerConfig::Human),
-            0x01 => Ok(PlayerConfig::Embedded),
-            0x02 => {
-                if bytes.len() < 2 {
-                    return Err(ProtocolError::InsufficientData {
-                        needed: 2,
-                        got: bytes.len(),
-                    });
-                }
-                let level = bytes[1];
-                if !(1..=8).contains(&level) {
-                    return Err(ProtocolError::LevelOutOfRange(level));
-                }
-                Ok(PlayerConfig::LichessAi { level })
-            }
-            other => Err(ProtocolError::UnknownPlayerType(other)),
-        }
+/// Wire format:
+/// - `[0x00]`           – Idle
+/// - `[0x01]`           – AwaitingPieces
+/// - `[0x02]`           – InProgress
+/// - `[0x03, color]`    – Checkmate (color = loser)
+/// - `[0x04]`           – Stalemate
+/// - `[0x05, color]`    – Resigned (color = resigning side)
+pub fn encode_game_status(status: &board_api::GameStatus) -> Vec<u8> {
+    match status {
+        board_api::GameStatus::Idle => vec![0x00],
+        board_api::GameStatus::AwaitingPieces => vec![0x01],
+        board_api::GameStatus::InProgress => vec![0x02],
+        board_api::GameStatus::Checkmate { loser } => vec![0x03, encode_color(*loser)],
+        board_api::GameStatus::Stalemate => vec![0x04],
+        board_api::GameStatus::Resigned { color } => vec![0x05, encode_color(*color)],
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum GameStatus {
-    Idle = 0x00,
-    AwaitingPieces = 0x01,
-    InProgress = 0x02,
-    Checkmate = 0x03,
-    Stalemate = 0x04,
-    Resignation = 0x05,
-    Draw = 0x06,
-}
-
-impl From<GameStatus> for u8 {
-    fn from(status: GameStatus) -> u8 {
-        status as u8
-    }
-}
-
-/// The current game state, sent to the app as a BLE notification.
-///
-/// Wire encoding: `[status: u8, turn: u8]`
-///
-/// `turn` is `0x00` for white, `0x01` for black.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GameState {
-    pub status: GameStatus,
-    pub turn: Color,
-}
-
-impl GameState {
-    pub fn idle() -> Self {
-        Self {
-            status: GameStatus::Idle,
-            turn: Color::White,
-        }
-    }
-
-    pub fn encode(&self) -> Vec<u8> {
-        let turn_byte: u8 = match self.turn {
-            Color::White => 0x00,
-            Color::Black => 0x01,
-        };
-        vec![u8::from(self.status), turn_byte]
-    }
-}
+// ---------------------------------------------------------------------------
+// BleCommand
+// ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BleCommand {
-    SetWhitePlayer(PlayerConfig),
-    SetBlackPlayer(PlayerConfig),
-    StartGame,
+    StartGame {
+        white: board_api::PlayerType,
+        black: board_api::PlayerType,
+    },
     CancelGame,
-    Resign { color: Color },
-    ConfigureWifi(WifiConfig),
-    SetLichessToken(String),
+    SubmitMove {
+        uci: String,
+    },
+    Resign {
+        color: Color,
+    },
 }
 
 impl BleCommand {
+    /// Parse a Start Game characteristic write.
+    ///
+    /// Format: `[white: u8, black: u8]`
+    pub fn parse_start_game(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        if bytes.len() < 2 {
+            return Err(ProtocolError::InsufficientData {
+                needed: 2,
+                got: bytes.len(),
+            });
+        }
+        let white = decode_player_type(bytes[0])?;
+        let black = decode_player_type(bytes[1])?;
+        Ok(BleCommand::StartGame { white, black })
+    }
+
+    /// Parse a Submit Move characteristic write.
+    ///
+    /// Format: `[len: u8, uci_bytes...]`
+    /// Rejects empty UCI strings (len = 0).
+    pub fn parse_submit_move(bytes: &[u8]) -> Result<Self, ProtocolError> {
+        let (uci, _) = read_length_prefixed_string(bytes, 0)?;
+        if uci.is_empty() {
+            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
+        }
+        Ok(BleCommand::SubmitMove { uci })
+    }
+
     /// Parse a Match Control characteristic write.
     ///
     /// Format: `[action: u8, ...]`
@@ -156,26 +160,93 @@ impl BleCommand {
             other => Err(ProtocolError::UnknownAction(other)),
         }
     }
+}
 
-    /// Parse a Lichess Token characteristic write.
-    ///
-    /// Format: `[token_len: u8, token_bytes...]`
-    /// Rejects empty tokens (token_len = 0).
-    pub fn parse_lichess_token(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        if bytes.is_empty() {
-            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
+// ---------------------------------------------------------------------------
+// CommandResult
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CommandSource {
+    StartGame = 0x00,
+    MatchControl = 0x01,
+    SubmitMove = 0x02,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ErrorCode {
+    GameAlreadyInProgress = 0x00,
+    NoGameInProgress = 0x01,
+    NotYourTurn = 0x02,
+    IllegalMove = 0x03,
+    CannotResignForRemotePlayer = 0x04,
+    InvalidCommand = 0x05,
+}
+
+/// The result of processing a BLE command.
+///
+/// Wire encoding: `[ok: u8, source: u8, error_code: u8]`
+/// - `ok` is `0x00` for success, `0x01` for error.
+/// - `source` identifies which command produced this result.
+/// - `error_code` is `0x00` on success (ignored), or one of [`ErrorCode`] on error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandResult {
+    pub ok: bool,
+    pub source: CommandSource,
+    pub error_code: Option<ErrorCode>,
+}
+
+impl CommandResult {
+    pub fn success(source: CommandSource) -> Self {
+        Self {
+            ok: true,
+            source,
+            error_code: None,
         }
+    }
 
-        let token_len = bytes[0] as usize;
-        if token_len == 0 {
-            return Err(ProtocolError::EmptyToken);
+    pub fn error(source: CommandSource, code: ErrorCode) -> Self {
+        Self {
+            ok: false,
+            source,
+            error_code: Some(code),
         }
+    }
 
-        let (token, _) = read_length_prefixed_string(bytes, 0)?;
-
-        Ok(BleCommand::SetLichessToken(token))
+    pub fn encode(&self) -> Vec<u8> {
+        if self.ok {
+            vec![0x00, self.source as u8, 0x00]
+        } else {
+            vec![
+                0x01,
+                self.source as u8,
+                self.error_code.unwrap_or(ErrorCode::InvalidCommand) as u8,
+            ]
+        }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Move encoding helpers
+// ---------------------------------------------------------------------------
+
+/// Encode a move to its wire bytes.
+///
+/// Format: `[color: u8, uci_len: u8, uci_bytes...]`
+pub fn encode_move(color: Color, uci: &str) -> Vec<u8> {
+    let uci_bytes = uci.as_bytes();
+    let mut out = Vec::with_capacity(2 + uci_bytes.len());
+    out.push(encode_color(color));
+    out.push(uci_bytes.len() as u8);
+    out.extend_from_slice(uci_bytes);
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
 
 /// Read a length-prefixed string from `bytes` starting at `offset`.
 /// Returns the decoded string and the offset past its end.
@@ -204,274 +275,9 @@ fn read_length_prefixed_string(
     ))
 }
 
-/// Parse a color byte: `0x00` = white, `0x01` = black.
-fn parse_color(byte: u8) -> Result<Color, ProtocolError> {
-    match byte {
-        0x00 => Ok(Color::White),
-        0x01 => Ok(Color::Black),
-        other => Err(ProtocolError::UnknownColor(other)),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum CommandSource {
-    StartGame = 0x00,
-    MatchControl = 0x01,
-}
-
-/// The result of processing a BLE command (Start Game or Match Control).
-///
-/// Wire encoding: `[ok: u8, command: u8, msg_len: u8, msg_bytes...]`
-/// - `ok` is `0x00` for success, `0x01` for error.
-/// - `command` identifies which command produced this result.
-/// - On success, `msg_len` is `0x00` and no message bytes follow.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandResult {
-    pub ok: bool,
-    pub source: CommandSource,
-    pub message: String,
-}
-
-impl CommandResult {
-    pub fn success(source: CommandSource) -> Self {
-        Self {
-            ok: true,
-            source,
-            message: String::new(),
-        }
-    }
-
-    pub fn error(source: CommandSource, msg: impl Into<String>) -> Self {
-        Self {
-            ok: false,
-            source,
-            message: msg.into(),
-        }
-    }
-
-    /// Panics if message exceeds 255 bytes.
-    pub fn encode(&self) -> Vec<u8> {
-        let msg_bytes = self.message.as_bytes();
-        let msg_len =
-            u8::try_from(msg_bytes.len()).expect("CommandResult message exceeds 255 bytes");
-        let ok_byte: u8 = if self.ok { 0x00 } else { 0x01 };
-
-        let mut out = Vec::with_capacity(3 + msg_bytes.len());
-        out.push(ok_byte);
-        out.push(self.source as u8);
-        out.push(msg_len);
-        out.extend_from_slice(msg_bytes);
-        out
-    }
-}
-
-/// WiFi authentication mode.
-///
-/// Wire encoding:
-/// - Open:  0x00
-/// - WPA2:  0x01
-/// - WPA3:  0x02
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum WifiAuthMode {
-    Open = 0x00,
-    Wpa2 = 0x01,
-    Wpa3 = 0x02,
-}
-
-impl WifiAuthMode {
-    pub fn from_byte(byte: u8) -> Result<Self, ProtocolError> {
-        match byte {
-            0x00 => Ok(WifiAuthMode::Open),
-            0x01 => Ok(WifiAuthMode::Wpa2),
-            0x02 => Ok(WifiAuthMode::Wpa3),
-            other => Err(ProtocolError::UnknownAuthMode(other)),
-        }
-    }
-}
-
-impl From<WifiAuthMode> for u8 {
-    fn from(mode: WifiAuthMode) -> u8 {
-        mode as u8
-    }
-}
-
-/// WiFi configuration sent via BLE.
-///
-/// Wire encoding: `[auth_mode: u8, ssid_len: u8, ssid_bytes..., pass_len: u8, pass_bytes...]`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WifiConfig {
-    pub ssid: String,
-    pub password: String,
-    pub auth_mode: WifiAuthMode,
-}
-
-impl WifiConfig {
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        if bytes.is_empty() {
-            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
-        }
-
-        let auth_mode = WifiAuthMode::from_byte(bytes[0])?;
-
-        let (ssid, pass_len_pos) = read_length_prefixed_string(bytes, 1)?;
-        let (password, _) = read_length_prefixed_string(bytes, pass_len_pos)?;
-
-        Ok(WifiConfig {
-            ssid,
-            password,
-            auth_mode,
-        })
-    }
-}
-
-/// WiFi connection state.
-///
-/// Wire encoding:
-/// - Disconnected: 0x00
-/// - Connecting:   0x01
-/// - Connected:    0x02
-/// - Failed:       0x03
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum WifiState {
-    Disconnected = 0x00,
-    Connecting = 0x01,
-    Connected = 0x02,
-    Failed = 0x03,
-}
-
-impl From<WifiState> for u8 {
-    fn from(state: WifiState) -> u8 {
-        state as u8
-    }
-}
-
-/// WiFi status sent to the app via BLE notification.
-///
-/// Wire encoding: `[state: u8, msg_len: u8, msg_bytes...]`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WifiStatus {
-    pub state: WifiState,
-    pub message: String,
-}
-
-impl WifiStatus {
-    pub fn disconnected() -> Self {
-        Self {
-            state: WifiState::Disconnected,
-            message: String::new(),
-        }
-    }
-
-    pub fn connecting() -> Self {
-        Self {
-            state: WifiState::Connecting,
-            message: String::new(),
-        }
-    }
-
-    pub fn connected() -> Self {
-        Self {
-            state: WifiState::Connected,
-            message: String::new(),
-        }
-    }
-
-    pub fn failed(msg: impl Into<String>) -> Self {
-        Self {
-            state: WifiState::Failed,
-            message: msg.into(),
-        }
-    }
-
-    /// Panics if message exceeds 255 bytes.
-    pub fn encode(&self) -> Vec<u8> {
-        let msg_bytes = self.message.as_bytes();
-        let msg_len = u8::try_from(msg_bytes.len()).expect("WifiStatus message exceeds 255 bytes");
-
-        let mut out = Vec::with_capacity(2 + msg_bytes.len());
-        out.push(u8::from(self.state));
-        out.push(msg_len);
-        out.extend_from_slice(msg_bytes);
-        out
-    }
-}
-
-/// Lichess connection state.
-///
-/// Wire encoding:
-/// - Idle:       0x00
-/// - Validating: 0x01
-/// - Connected:  0x02
-/// - Failed:     0x03
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum LichessState {
-    Idle = 0x00,
-    Validating = 0x01,
-    Connected = 0x02,
-    Failed = 0x03,
-}
-
-impl From<LichessState> for u8 {
-    fn from(state: LichessState) -> u8 {
-        state as u8
-    }
-}
-
-/// Lichess status sent to the app via BLE notification.
-///
-/// Wire encoding: `[state: u8, msg_len: u8, msg_bytes...]`
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LichessStatus {
-    pub state: LichessState,
-    pub message: String,
-}
-
-impl LichessStatus {
-    pub fn idle() -> Self {
-        Self {
-            state: LichessState::Idle,
-            message: String::new(),
-        }
-    }
-
-    pub fn validating() -> Self {
-        Self {
-            state: LichessState::Validating,
-            message: String::new(),
-        }
-    }
-
-    pub fn connected() -> Self {
-        Self {
-            state: LichessState::Connected,
-            message: String::new(),
-        }
-    }
-
-    pub fn failed(msg: impl Into<String>) -> Self {
-        Self {
-            state: LichessState::Failed,
-            message: msg.into(),
-        }
-    }
-
-    /// Panics if message exceeds 255 bytes.
-    pub fn encode(&self) -> Vec<u8> {
-        let msg_bytes = self.message.as_bytes();
-        let msg_len =
-            u8::try_from(msg_bytes.len()).expect("LichessStatus message exceeds 255 bytes");
-
-        let mut out = Vec::with_capacity(2 + msg_bytes.len());
-        out.push(u8::from(self.state));
-        out.push(msg_len);
-        out.extend_from_slice(msg_bytes);
-        out
-    }
-}
+// ---------------------------------------------------------------------------
+// UUIDs
+// ---------------------------------------------------------------------------
 
 /// BLE GATT UUID constants.
 ///
@@ -479,120 +285,235 @@ impl LichessStatus {
 /// They are assigned once and must not change — bonded iOS devices
 /// cache discovered services.
 pub mod uuids {
-    pub const GAME_SERVICE: &str = "3d6343a2-1001-44ea-8fc2-3568d7216866";
-    pub const WHITE_PLAYER: &str = "3d6343a2-1002-44ea-8fc2-3568d7216866";
-    pub const BLACK_PLAYER: &str = "3d6343a2-1003-44ea-8fc2-3568d7216866";
-    pub const START_GAME: &str = "3d6343a2-1004-44ea-8fc2-3568d7216866";
-    pub const MATCH_CONTROL: &str = "3d6343a2-1005-44ea-8fc2-3568d7216866";
-    pub const GAME_STATE: &str = "3d6343a2-1006-44ea-8fc2-3568d7216866";
-    pub const COMMAND_RESULT: &str = "3d6343a2-1007-44ea-8fc2-3568d7216866";
-
-    pub const WIFI_SERVICE: &str = "3d6343a2-2001-44ea-8fc2-3568d7216866";
-    pub const WIFI_CONFIG: &str = "3d6343a2-2002-44ea-8fc2-3568d7216866";
-    pub const WIFI_STATUS: &str = "3d6343a2-2003-44ea-8fc2-3568d7216866";
-
-    pub const LICHESS_SERVICE: &str = "3d6343a2-3001-44ea-8fc2-3568d7216866";
-    pub const LICHESS_TOKEN: &str = "3d6343a2-3002-44ea-8fc2-3568d7216866";
-    pub const LICHESS_STATUS: &str = "3d6343a2-3003-44ea-8fc2-3568d7216866";
+    pub const GAME_SERVICE: &str = "3d6343a2-1010-44ea-8fc2-3568d7216866";
+    pub const WHITE_PLAYER: &str = "3d6343a2-1011-44ea-8fc2-3568d7216866";
+    pub const BLACK_PLAYER: &str = "3d6343a2-1012-44ea-8fc2-3568d7216866";
+    pub const START_GAME: &str = "3d6343a2-1013-44ea-8fc2-3568d7216866";
+    pub const MATCH_CONTROL: &str = "3d6343a2-1014-44ea-8fc2-3568d7216866";
+    pub const GAME_STATUS: &str = "3d6343a2-1015-44ea-8fc2-3568d7216866";
+    pub const COMMAND_RESULT: &str = "3d6343a2-1016-44ea-8fc2-3568d7216866";
+    pub const SUBMIT_MOVE: &str = "3d6343a2-1017-44ea-8fc2-3568d7216866";
+    pub const POSITION: &str = "3d6343a2-1018-44ea-8fc2-3568d7216866";
+    pub const LAST_MOVE: &str = "3d6343a2-1019-44ea-8fc2-3568d7216866";
+    pub const MOVE_PLAYED: &str = "3d6343a2-101a-44ea-8fc2-3568d7216866";
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shakmaty::Color;
+
+    // --- encode_player_type / decode_player_type ---
 
     #[test]
-    fn encode_human_player() {
-        assert_eq!(PlayerConfig::Human.encode(), vec![0x00]);
+    fn encode_human_player_type() {
+        assert_eq!(encode_player_type(board_api::PlayerType::Human), 0x00);
     }
 
     #[test]
-    fn encode_embedded_player() {
-        assert_eq!(PlayerConfig::Embedded.encode(), vec![0x01]);
+    fn encode_remote_player_type() {
+        assert_eq!(encode_player_type(board_api::PlayerType::Remote), 0x01);
     }
 
     #[test]
-    fn encode_lichess_ai_player() {
-        assert_eq!(
-            PlayerConfig::LichessAi { level: 5 }.encode(),
-            vec![0x02, 0x05]
-        );
+    fn decode_human_player_type() {
+        assert_eq!(decode_player_type(0x00), Ok(board_api::PlayerType::Human));
     }
 
     #[test]
-    fn encode_decode_roundtrip() {
-        let configs = [
-            PlayerConfig::Human,
-            PlayerConfig::Embedded,
-            PlayerConfig::LichessAi { level: 1 },
-            PlayerConfig::LichessAi { level: 8 },
-        ];
-        for config in &configs {
-            let encoded = config.encode();
-            let decoded = PlayerConfig::from_bytes(&encoded).expect("roundtrip should succeed");
-            assert_eq!(&decoded, config);
-        }
+    fn decode_remote_player_type() {
+        assert_eq!(decode_player_type(0x01), Ok(board_api::PlayerType::Remote));
     }
 
     #[test]
-    fn parse_human_player() {
-        let result = PlayerConfig::from_bytes(&[0x00]);
-        assert_eq!(result, Ok(PlayerConfig::Human));
-    }
-
-    #[test]
-    fn parse_embedded_player() {
-        let result = PlayerConfig::from_bytes(&[0x01]);
-        assert_eq!(result, Ok(PlayerConfig::Embedded));
-    }
-
-    #[test]
-    fn parse_lichess_ai_level_4() {
-        let result = PlayerConfig::from_bytes(&[0x02, 0x04]);
-        assert_eq!(result, Ok(PlayerConfig::LichessAi { level: 4 }));
-    }
-
-    #[test]
-    fn parse_lichess_ai_level_1_boundary() {
-        let result = PlayerConfig::from_bytes(&[0x02, 0x01]);
-        assert_eq!(result, Ok(PlayerConfig::LichessAi { level: 1 }));
-    }
-
-    #[test]
-    fn parse_lichess_ai_level_8_boundary() {
-        let result = PlayerConfig::from_bytes(&[0x02, 0x08]);
-        assert_eq!(result, Ok(PlayerConfig::LichessAi { level: 8 }));
-    }
-
-    #[test]
-    fn reject_unset_byte() {
-        let result = PlayerConfig::from_bytes(&[UNSET_BYTE]);
+    fn decode_unknown_player_type() {
         assert!(matches!(
-            result,
-            Err(ProtocolError::UnknownPlayerType(0xFF))
-        ));
-    }
-
-    #[test]
-    fn reject_unknown_player_type() {
-        let result = PlayerConfig::from_bytes(&[0x42]);
-        assert!(matches!(
-            result,
+            decode_player_type(0x42),
             Err(ProtocolError::UnknownPlayerType(0x42))
         ));
     }
 
     #[test]
-    fn reject_empty_bytes() {
-        let result = PlayerConfig::from_bytes(&[]);
+    fn decode_unset_byte_player_type() {
         assert!(matches!(
-            result,
-            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
+            decode_player_type(UNSET_BYTE),
+            Err(ProtocolError::UnknownPlayerType(0xFF))
         ));
     }
 
     #[test]
-    fn reject_lichess_missing_level_byte() {
-        let result = PlayerConfig::from_bytes(&[0x02]);
+    fn player_type_encode_decode_roundtrip() {
+        for pt in [board_api::PlayerType::Human, board_api::PlayerType::Remote] {
+            let encoded = encode_player_type(pt);
+            let decoded = decode_player_type(encoded).expect("roundtrip should succeed");
+            assert_eq!(decoded, pt);
+        }
+    }
+
+    // --- encode_color / parse_color ---
+
+    #[test]
+    fn encode_color_white() {
+        assert_eq!(encode_color(Color::White), 0x00);
+    }
+
+    #[test]
+    fn encode_color_black() {
+        assert_eq!(encode_color(Color::Black), 0x01);
+    }
+
+    #[test]
+    fn parse_color_white() {
+        assert_eq!(parse_color(0x00), Ok(Color::White));
+    }
+
+    #[test]
+    fn parse_color_black() {
+        assert_eq!(parse_color(0x01), Ok(Color::Black));
+    }
+
+    #[test]
+    fn parse_color_unknown() {
+        assert!(matches!(
+            parse_color(0x02),
+            Err(ProtocolError::UnknownColor(0x02))
+        ));
+    }
+
+    #[test]
+    fn color_encode_parse_roundtrip() {
+        for color in [Color::White, Color::Black] {
+            let encoded = encode_color(color);
+            let decoded = parse_color(encoded).expect("roundtrip should succeed");
+            assert_eq!(decoded, color);
+        }
+    }
+
+    // --- encode_game_status ---
+
+    #[test]
+    fn encode_game_status_idle() {
+        assert_eq!(encode_game_status(&board_api::GameStatus::Idle), vec![0x00]);
+    }
+
+    #[test]
+    fn encode_game_status_awaiting_pieces() {
+        assert_eq!(
+            encode_game_status(&board_api::GameStatus::AwaitingPieces),
+            vec![0x01]
+        );
+    }
+
+    #[test]
+    fn encode_game_status_in_progress() {
+        assert_eq!(
+            encode_game_status(&board_api::GameStatus::InProgress),
+            vec![0x02]
+        );
+    }
+
+    #[test]
+    fn encode_game_status_checkmate_white_loses() {
+        assert_eq!(
+            encode_game_status(&board_api::GameStatus::Checkmate {
+                loser: Color::White
+            }),
+            vec![0x03, 0x00]
+        );
+    }
+
+    #[test]
+    fn encode_game_status_checkmate_black_loses() {
+        assert_eq!(
+            encode_game_status(&board_api::GameStatus::Checkmate {
+                loser: Color::Black
+            }),
+            vec![0x03, 0x01]
+        );
+    }
+
+    #[test]
+    fn encode_game_status_stalemate() {
+        assert_eq!(
+            encode_game_status(&board_api::GameStatus::Stalemate),
+            vec![0x04]
+        );
+    }
+
+    #[test]
+    fn encode_game_status_resigned_white() {
+        assert_eq!(
+            encode_game_status(&board_api::GameStatus::Resigned {
+                color: Color::White
+            }),
+            vec![0x05, 0x00]
+        );
+    }
+
+    #[test]
+    fn encode_game_status_resigned_black() {
+        assert_eq!(
+            encode_game_status(&board_api::GameStatus::Resigned {
+                color: Color::Black
+            }),
+            vec![0x05, 0x01]
+        );
+    }
+
+    // --- BleCommand::parse_start_game ---
+
+    #[test]
+    fn parse_start_game_human_human() {
+        let result = BleCommand::parse_start_game(&[0x00, 0x00]);
+        assert_eq!(
+            result,
+            Ok(BleCommand::StartGame {
+                white: board_api::PlayerType::Human,
+                black: board_api::PlayerType::Human,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_start_game_human_remote() {
+        let result = BleCommand::parse_start_game(&[0x00, 0x01]);
+        assert_eq!(
+            result,
+            Ok(BleCommand::StartGame {
+                white: board_api::PlayerType::Human,
+                black: board_api::PlayerType::Remote,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_start_game_remote_human() {
+        let result = BleCommand::parse_start_game(&[0x01, 0x00]);
+        assert_eq!(
+            result,
+            Ok(BleCommand::StartGame {
+                white: board_api::PlayerType::Remote,
+                black: board_api::PlayerType::Human,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_start_game_insufficient_data_empty() {
+        let result = BleCommand::parse_start_game(&[]);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 2, got: 0 })
+        ));
+    }
+
+    #[test]
+    fn parse_start_game_insufficient_data_one_byte() {
+        let result = BleCommand::parse_start_game(&[0x00]);
         assert!(matches!(
             result,
             Err(ProtocolError::InsufficientData { needed: 2, got: 1 })
@@ -600,49 +521,83 @@ mod tests {
     }
 
     #[test]
-    fn reject_lichess_level_zero() {
-        let result = PlayerConfig::from_bytes(&[0x02, 0x00]);
-        assert!(matches!(result, Err(ProtocolError::LevelOutOfRange(0))));
+    fn parse_start_game_unknown_white_player_type() {
+        let result = BleCommand::parse_start_game(&[0x42, 0x00]);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::UnknownPlayerType(0x42))
+        ));
     }
 
     #[test]
-    fn reject_lichess_level_nine() {
-        let result = PlayerConfig::from_bytes(&[0x02, 0x09]);
-        assert!(matches!(result, Err(ProtocolError::LevelOutOfRange(9))));
+    fn parse_start_game_unknown_black_player_type() {
+        let result = BleCommand::parse_start_game(&[0x00, 0xFF]);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::UnknownPlayerType(0xFF))
+        ));
+    }
+
+    // --- BleCommand::parse_submit_move ---
+
+    #[test]
+    fn parse_submit_move_valid_e2e4() {
+        // [len=4, 'e', '2', 'e', '4']
+        let bytes = [4u8, b'e', b'2', b'e', b'4'];
+        let result = BleCommand::parse_submit_move(&bytes);
+        assert_eq!(
+            result,
+            Ok(BleCommand::SubmitMove {
+                uci: "e2e4".to_string()
+            })
+        );
     }
 
     #[test]
-    fn encode_idle_state() {
-        let state = GameState::idle();
-        let encoded = state.encode();
-
-        assert_eq!(encoded, vec![0x00, 0x00]);
-        assert_eq!(encoded.len(), 2);
+    fn parse_submit_move_valid_promotion() {
+        // [len=5, 'e', '7', 'e', '8', 'q']
+        let bytes = [5u8, b'e', b'7', b'e', b'8', b'q'];
+        let result = BleCommand::parse_submit_move(&bytes);
+        assert_eq!(
+            result,
+            Ok(BleCommand::SubmitMove {
+                uci: "e7e8q".to_string()
+            })
+        );
     }
 
     #[test]
-    fn encode_in_progress_state_black_turn() {
-        let state = GameState {
-            status: GameStatus::InProgress,
-            turn: Color::Black,
-        };
-        let encoded = state.encode();
-
-        assert_eq!(encoded[0], 0x02); // InProgress
-        assert_eq!(encoded[1], 0x01); // Black
-        assert_eq!(encoded.len(), 2);
+    fn parse_submit_move_empty_uci_rejected() {
+        // [len=0] — empty UCI
+        let bytes = [0u8];
+        let result = BleCommand::parse_submit_move(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { .. })
+        ));
     }
 
     #[test]
-    fn encode_game_state_byte_layout() {
-        // Verify the exact byte structure: [status, turn]
-        let state = GameState {
-            status: GameStatus::Checkmate,
-            turn: Color::White,
-        };
-        let encoded = state.encode();
-        assert_eq!(encoded, vec![0x03, 0x00]);
+    fn parse_submit_move_no_data() {
+        let result = BleCommand::parse_submit_move(&[]);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
+        ));
     }
+
+    #[test]
+    fn parse_submit_move_truncated() {
+        // [len=6, 'e', '2', 'e'] — claims 6 bytes but only 3 follow
+        let bytes = [6u8, b'e', b'2', b'e'];
+        let result = BleCommand::parse_submit_move(&bytes);
+        assert!(matches!(
+            result,
+            Err(ProtocolError::InsufficientData { needed: 7, got: 4 })
+        ));
+    }
+
+    // --- BleCommand::parse_match_control ---
 
     #[test]
     fn parse_resign_white() {
@@ -686,13 +641,13 @@ mod tests {
     }
 
     #[test]
-    fn reject_unknown_color() {
+    fn reject_unknown_color_in_match_control() {
         let result = BleCommand::parse_match_control(&[0x00, 0x02]);
         assert!(matches!(result, Err(ProtocolError::UnknownColor(0x02))));
     }
 
     #[test]
-    fn reject_match_control_insufficient_data() {
+    fn reject_match_control_insufficient_data_resign() {
         let result = BleCommand::parse_match_control(&[0x00]);
         assert!(matches!(
             result,
@@ -709,6 +664,8 @@ mod tests {
         ));
     }
 
+    // --- CommandResult encoding ---
+
     #[test]
     fn encode_success_start_game() {
         let result = CommandResult::success(CommandSource::StartGame);
@@ -722,234 +679,139 @@ mod tests {
     }
 
     #[test]
-    fn encode_error_start_game() {
-        let result = CommandResult::error(CommandSource::StartGame, "oops");
-        let encoded = result.encode();
-        assert_eq!(encoded[0], 0x01); // error
-        assert_eq!(encoded[1], 0x00); // StartGame
-        assert_eq!(encoded[2], 4); // "oops" is 4 bytes
-        assert_eq!(&encoded[3..], b"oops");
+    fn encode_success_submit_move() {
+        let result = CommandResult::success(CommandSource::SubmitMove);
+        assert_eq!(result.encode(), vec![0x00, 0x02, 0x00]);
     }
 
     #[test]
-    fn encode_error_match_control_byte_layout() {
-        let result = CommandResult::error(CommandSource::MatchControl, "hi");
-        assert_eq!(result.encode(), vec![0x01, 0x01, 0x02, b'h', b'i']);
+    fn encode_error_game_already_in_progress() {
+        let result =
+            CommandResult::error(CommandSource::StartGame, ErrorCode::GameAlreadyInProgress);
+        assert_eq!(result.encode(), vec![0x01, 0x00, 0x00]);
     }
 
     #[test]
-    fn encode_error_start_game_byte_layout() {
-        let result = CommandResult::error(CommandSource::StartGame, "hi");
-        assert_eq!(result.encode(), vec![0x01, 0x00, 0x02, b'h', b'i']);
+    fn encode_error_no_game_in_progress() {
+        let result = CommandResult::error(CommandSource::MatchControl, ErrorCode::NoGameInProgress);
+        assert_eq!(result.encode(), vec![0x01, 0x01, 0x01]);
     }
 
     #[test]
-    fn game_status_values() {
-        assert_eq!(u8::from(GameStatus::Idle), 0x00);
-        assert_eq!(u8::from(GameStatus::AwaitingPieces), 0x01);
-        assert_eq!(u8::from(GameStatus::InProgress), 0x02);
-        assert_eq!(u8::from(GameStatus::Checkmate), 0x03);
-        assert_eq!(u8::from(GameStatus::Stalemate), 0x04);
-        assert_eq!(u8::from(GameStatus::Resignation), 0x05);
-        assert_eq!(u8::from(GameStatus::Draw), 0x06);
+    fn encode_error_not_your_turn() {
+        let result = CommandResult::error(CommandSource::SubmitMove, ErrorCode::NotYourTurn);
+        assert_eq!(result.encode(), vec![0x01, 0x02, 0x02]);
     }
 
     #[test]
-    fn uuid_registry_has_correct_values() {
-        assert_eq!(uuids::GAME_SERVICE, "3d6343a2-1001-44ea-8fc2-3568d7216866");
-        assert_eq!(uuids::WHITE_PLAYER, "3d6343a2-1002-44ea-8fc2-3568d7216866");
-        assert_eq!(uuids::BLACK_PLAYER, "3d6343a2-1003-44ea-8fc2-3568d7216866");
-        assert_eq!(uuids::START_GAME, "3d6343a2-1004-44ea-8fc2-3568d7216866");
-        assert_eq!(uuids::MATCH_CONTROL, "3d6343a2-1005-44ea-8fc2-3568d7216866");
-        assert_eq!(uuids::GAME_STATE, "3d6343a2-1006-44ea-8fc2-3568d7216866");
+    fn encode_error_illegal_move() {
+        let result = CommandResult::error(CommandSource::SubmitMove, ErrorCode::IllegalMove);
+        assert_eq!(result.encode(), vec![0x01, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn encode_error_cannot_resign_for_remote() {
+        let result = CommandResult::error(
+            CommandSource::MatchControl,
+            ErrorCode::CannotResignForRemotePlayer,
+        );
+        assert_eq!(result.encode(), vec![0x01, 0x01, 0x04]);
+    }
+
+    #[test]
+    fn encode_error_invalid_command() {
+        let result = CommandResult::error(CommandSource::StartGame, ErrorCode::InvalidCommand);
+        assert_eq!(result.encode(), vec![0x01, 0x00, 0x05]);
+    }
+
+    #[test]
+    fn command_result_ok_field_set_correctly() {
+        let ok = CommandResult::success(CommandSource::StartGame);
+        assert!(ok.ok);
+        assert_eq!(ok.error_code, None);
+
+        let err = CommandResult::error(CommandSource::StartGame, ErrorCode::GameAlreadyInProgress);
+        assert!(!err.ok);
+        assert_eq!(err.error_code, Some(ErrorCode::GameAlreadyInProgress));
+    }
+
+    // --- encode_move ---
+
+    #[test]
+    fn encode_move_e2e4_white() {
+        let encoded = encode_move(Color::White, "e2e4");
+        assert_eq!(encoded, vec![0x00, 4, b'e', b'2', b'e', b'4']);
+    }
+
+    #[test]
+    fn encode_move_d7d5_black() {
+        let encoded = encode_move(Color::Black, "d7d5");
+        assert_eq!(encoded, vec![0x01, 4, b'd', b'7', b'd', b'5']);
+    }
+
+    #[test]
+    fn encode_move_promotion() {
+        let encoded = encode_move(Color::White, "e7e8q");
+        assert_eq!(encoded, vec![0x00, 5, b'e', b'7', b'e', b'8', b'q']);
+    }
+
+    // --- UUID correctness ---
+
+    #[test]
+    fn uuid_game_service() {
+        assert_eq!(uuids::GAME_SERVICE, "3d6343a2-1010-44ea-8fc2-3568d7216866");
+    }
+
+    #[test]
+    fn uuid_white_player() {
+        assert_eq!(uuids::WHITE_PLAYER, "3d6343a2-1011-44ea-8fc2-3568d7216866");
+    }
+
+    #[test]
+    fn uuid_black_player() {
+        assert_eq!(uuids::BLACK_PLAYER, "3d6343a2-1012-44ea-8fc2-3568d7216866");
+    }
+
+    #[test]
+    fn uuid_start_game() {
+        assert_eq!(uuids::START_GAME, "3d6343a2-1013-44ea-8fc2-3568d7216866");
+    }
+
+    #[test]
+    fn uuid_match_control() {
+        assert_eq!(uuids::MATCH_CONTROL, "3d6343a2-1014-44ea-8fc2-3568d7216866");
+    }
+
+    #[test]
+    fn uuid_game_status() {
+        assert_eq!(uuids::GAME_STATUS, "3d6343a2-1015-44ea-8fc2-3568d7216866");
+    }
+
+    #[test]
+    fn uuid_command_result() {
         assert_eq!(
             uuids::COMMAND_RESULT,
-            "3d6343a2-1007-44ea-8fc2-3568d7216866"
-        );
-        assert_eq!(uuids::WIFI_SERVICE, "3d6343a2-2001-44ea-8fc2-3568d7216866");
-        assert_eq!(uuids::WIFI_CONFIG, "3d6343a2-2002-44ea-8fc2-3568d7216866");
-        assert_eq!(uuids::WIFI_STATUS, "3d6343a2-2003-44ea-8fc2-3568d7216866");
-        assert_eq!(
-            uuids::LICHESS_SERVICE,
-            "3d6343a2-3001-44ea-8fc2-3568d7216866"
-        );
-        assert_eq!(uuids::LICHESS_TOKEN, "3d6343a2-3002-44ea-8fc2-3568d7216866");
-        assert_eq!(
-            uuids::LICHESS_STATUS,
-            "3d6343a2-3003-44ea-8fc2-3568d7216866"
-        );
-    }
-
-    // WiFi config parsing tests
-    #[test]
-    fn parse_wifi_config_wpa2() {
-        // [auth=0x01][ssid_len=5][ssid="MyNet"][pass_len=7][pass="pass123"]
-        let bytes = [
-            0x01u8, 5, b'M', b'y', b'N', b'e', b't', 7, b'p', b'a', b's', b's', b'1', b'2', b'3',
-        ];
-        let config = WifiConfig::from_bytes(&bytes).expect("should parse WPA2 config");
-        assert_eq!(config.ssid, "MyNet");
-        assert_eq!(config.password, "pass123");
-        assert_eq!(config.auth_mode, WifiAuthMode::Wpa2);
-    }
-
-    #[test]
-    fn parse_wifi_config_open() {
-        // [auth=0x00][ssid_len=4][ssid="Open"][pass_len=0]
-        let bytes = [0x00u8, 4, b'O', b'p', b'e', b'n', 0];
-        let config = WifiConfig::from_bytes(&bytes).expect("should parse Open config");
-        assert_eq!(config.ssid, "Open");
-        assert_eq!(config.password, "");
-        assert_eq!(config.auth_mode, WifiAuthMode::Open);
-    }
-
-    #[test]
-    fn parse_wifi_config_wpa3() {
-        // [auth=0x02][ssid_len=7][ssid="Network"][pass_len=8][pass="password"]
-        let bytes = [
-            0x02u8, 7, b'N', b'e', b't', b'w', b'o', b'r', b'k', 8, b'p', b'a', b's', b's', b'w',
-            b'o', b'r', b'd',
-        ];
-        let config = WifiConfig::from_bytes(&bytes).expect("should parse WPA3 config");
-        assert_eq!(config.ssid, "Network");
-        assert_eq!(config.password, "password");
-        assert_eq!(config.auth_mode, WifiAuthMode::Wpa3);
-    }
-
-    #[test]
-    fn parse_wifi_config_empty_bytes() {
-        let bytes = b"";
-        let result = WifiConfig::from_bytes(bytes);
-        assert!(matches!(
-            result,
-            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
-        ));
-    }
-
-    #[test]
-    fn parse_wifi_config_truncated_ssid() {
-        // [auth=0x01][ssid_len=5][ssid="abc"] - claims 5 bytes but only has 3
-        let bytes = [0x01u8, 5, b'a', b'b', b'c'];
-        let result = WifiConfig::from_bytes(&bytes);
-        assert!(matches!(
-            result,
-            Err(ProtocolError::InsufficientData { needed: 7, got: 5 })
-        ));
-    }
-
-    #[test]
-    fn parse_wifi_config_missing_pass_len() {
-        // [auth=0x01][ssid_len=3][ssid="Net"] - missing pass_len byte
-        let bytes = [0x01u8, 3, b'N', b'e', b't'];
-        let result = WifiConfig::from_bytes(&bytes);
-        assert!(matches!(
-            result,
-            Err(ProtocolError::InsufficientData { needed: 6, got: 5 })
-        ));
-    }
-
-    #[test]
-    fn parse_wifi_config_unknown_auth() {
-        // [auth=0x03][ssid_len=3][ssid="Net"][pass_len=4][pass="pass"]
-        let bytes = [0x03u8, 3, b'N', b'e', b't', 4, b'p', b'a', b's', b's'];
-        let result = WifiConfig::from_bytes(&bytes);
-        assert!(matches!(result, Err(ProtocolError::UnknownAuthMode(0x03))));
-    }
-
-    // WiFi status encoding tests
-    #[test]
-    fn encode_wifi_disconnected() {
-        let status = WifiStatus::disconnected();
-        assert_eq!(status.encode(), vec![0x00, 0x00]);
-    }
-
-    #[test]
-    fn encode_wifi_connecting() {
-        let status = WifiStatus::connecting();
-        assert_eq!(status.encode(), vec![0x01, 0x00]);
-    }
-
-    #[test]
-    fn encode_wifi_connected() {
-        let status = WifiStatus::connected();
-        assert_eq!(status.encode(), vec![0x02, 0x00]);
-    }
-
-    #[test]
-    fn encode_wifi_failed() {
-        let status = WifiStatus::failed("timeout");
-        let encoded = status.encode();
-        assert_eq!(encoded[0], 0x03);
-        assert_eq!(encoded[1], 7); // "timeout" is 7 bytes
-        assert_eq!(&encoded[2..], b"timeout");
-    }
-
-    // Lichess token parsing tests
-    #[test]
-    fn parse_lichess_token_valid() {
-        let bytes = [
-            11u8, b'l', b'i', b'p', b'_', b'a', b'b', b'c', b'1', b'2', b'3', b'4',
-        ];
-        let result = BleCommand::parse_lichess_token(&bytes);
-        assert_eq!(
-            result,
-            Ok(BleCommand::SetLichessToken("lip_abc1234".to_string()))
+            "3d6343a2-1016-44ea-8fc2-3568d7216866"
         );
     }
 
     #[test]
-    fn parse_lichess_token_empty() {
-        let bytes = [0u8];
-        let result = BleCommand::parse_lichess_token(&bytes);
-        assert!(matches!(result, Err(ProtocolError::EmptyToken)));
+    fn uuid_submit_move() {
+        assert_eq!(uuids::SUBMIT_MOVE, "3d6343a2-1017-44ea-8fc2-3568d7216866");
     }
 
     #[test]
-    fn parse_lichess_token_truncated() {
-        // token_len=10 but only 3 bytes follow
-        let bytes = [10u8, b'a', b'b', b'c'];
-        let result = BleCommand::parse_lichess_token(&bytes);
-        assert!(matches!(
-            result,
-            Err(ProtocolError::InsufficientData { needed: 11, got: 4 })
-        ));
+    fn uuid_position() {
+        assert_eq!(uuids::POSITION, "3d6343a2-1018-44ea-8fc2-3568d7216866");
     }
 
     #[test]
-    fn parse_lichess_token_no_data() {
-        let bytes = [];
-        let result = BleCommand::parse_lichess_token(&bytes);
-        assert!(matches!(
-            result,
-            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
-        ));
-    }
-
-    // Lichess status encoding tests
-    #[test]
-    fn encode_lichess_idle() {
-        let status = LichessStatus::idle();
-        assert_eq!(status.encode(), vec![0x00, 0x00]);
+    fn uuid_last_move() {
+        assert_eq!(uuids::LAST_MOVE, "3d6343a2-1019-44ea-8fc2-3568d7216866");
     }
 
     #[test]
-    fn encode_lichess_validating() {
-        let status = LichessStatus::validating();
-        assert_eq!(status.encode(), vec![0x01, 0x00]);
-    }
-
-    #[test]
-    fn encode_lichess_connected() {
-        let status = LichessStatus::connected();
-        assert_eq!(status.encode(), vec![0x02, 0x00]);
-    }
-
-    #[test]
-    fn encode_lichess_failed() {
-        let status = LichessStatus::failed("invalid token");
-        let encoded = status.encode();
-        assert_eq!(encoded[0], 0x03);
-        assert_eq!(encoded[1], 13); // "invalid token" is 13 bytes
-        assert_eq!(&encoded[2..], b"invalid token");
+    fn uuid_move_played() {
+        assert_eq!(uuids::MOVE_PLAYED, "3d6343a2-101a-44ea-8fc2-3568d7216866");
     }
 }
