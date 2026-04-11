@@ -22,4 +22,16 @@ enum PlayerType: UInt8, Equatable {
         case .lichessAi: return Data([0x02, UInt8(level)])
         }
     }
+
+    /// Decode a player type from the firmware wire format.
+    ///
+    /// Wire format:
+    /// - `[0x00]` → `.human`
+    /// - `[0x01]` → `.embedded`
+    /// - `[0x02, level]` → `.lichessAi`
+    /// - `[0xFF]` (UNSET) → `nil`
+    static func decode(_ data: Data) -> PlayerType? {
+        guard let first = data.first else { return nil }
+        return PlayerType(rawValue: first)
+    }
 }

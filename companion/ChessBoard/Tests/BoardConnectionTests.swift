@@ -117,4 +117,33 @@ final class BoardConnectionTests: XCTestCase {
         board.connectionTimedOut()
         XCTAssertEqual(board.connectionState, .setupFailed)
     }
+
+    func testResignColorAfterReconnect() {
+        // Simulate fresh app start: player types are nil, game still in progress on firmware
+        let board = BoardConnection(
+            connectionState: .ready,
+            gameState: GameState(status: .inProgress, turn: .white),
+            whitePlayerType: nil,
+            blackPlayerType: nil
+        )
+        // Before player types are read from firmware: no resign available
+        XCTAssertNil(board.resignColor)
+
+        // Simulate BLE transport reading player types from firmware
+        board.whitePlayerType = .human
+        board.blackPlayerType = .embedded
+
+        // Now resign should work — human is white
+        XCTAssertEqual(board.resignColor, .white)
+    }
+
+    func testResignColorNilWhenPlayersUnset() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            gameState: GameState(status: .inProgress, turn: .white),
+            whitePlayerType: nil,
+            blackPlayerType: nil
+        )
+        XCTAssertNil(board.resignColor)
+    }
 }

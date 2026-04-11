@@ -41,10 +41,10 @@ class BoardConnection {
     var wifiStatus: WifiStatus = .disconnected
     var lichessStatus: LichessStatus = .idle
 
-    /// Player types written by the app when starting a game.
+    /// Player types for each side, read from firmware on connect.
     /// Used to determine which side is human for resign.
-    private(set) var whitePlayerType: PlayerType?
-    private(set) var blackPlayerType: PlayerType?
+    var whitePlayerType: PlayerType?
+    var blackPlayerType: PlayerType?
 
     private var transport: BoardTransport?
 

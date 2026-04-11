@@ -166,6 +166,12 @@ final class BLETransport: NSObject, BoardTransport,
                 awaitingInitialState = true
                 peripheral.readValue(for: gs)
             }
+            if let wp = characteristics[GATT.whitePlayer] {
+                peripheral.readValue(for: wp)
+            }
+            if let bp = characteristics[GATT.blackPlayer] {
+                peripheral.readValue(for: bp)
+            }
         case GATT.wifiService:
             guard let chars = service.characteristics else { return }
             for char in chars {
@@ -226,6 +232,10 @@ final class BLETransport: NSObject, BoardTransport,
             if let decoded = LichessStatus.decode(data) {
                 owner?.lichessStatus = decoded
             }
+        case GATT.whitePlayer:
+            owner?.whitePlayerType = PlayerType.decode(data)
+        case GATT.blackPlayer:
+            owner?.blackPlayerType = PlayerType.decode(data)
         default:
             break
         }
