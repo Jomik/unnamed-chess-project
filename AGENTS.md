@@ -89,7 +89,8 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **player/human.rs** — `HumanPlayer`: detects moves from sensor bitboards by matching against legal moves
 - **player/embedded.rs** — `EmbeddedEngine`: heuristic AI (captures > castling > promotions > random)
 - **feedback.rs** — `compute_feedback` and `compute_state_feedback`: feedback from position + sensors. Recovery guidance is integrated as a fallback path.
-- **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame; also exposes `resign()`, `is_game_over()`, and `game_state()` for BLE game lifecycle management
+- **board_api.rs** — Transport-agnostic domain types from `docs/board-api.md`: `GameStatus`, `PlayerType`, `BoardApiError`. `GameSession` returns these directly; BLE encoding lives in `ble_protocol`.
+- **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame; also exposes `resign()`, `is_game_over()`, and `game_state()` for game lifecycle management
 - **ble_protocol.rs** — `BleCommand`, `PlayerConfig`, `GameState`, `CommandResult`, `WifiAuthMode`, `WifiConfig`, `WifiState`, `WifiStatus`, `LichessState`, `LichessStatus`, UUID constants, binary encoding/decoding. Platform-independent, host-testable.
 - **esp32/sensor.rs** — `Esp32PieceSensor`: ADC + mux scanning, `RawScan` for raw millivolt readings, `read_raw()` primitive
 - **esp32/ble.rs** — `start_ble()` initializes NimBLE and returns `BleCommands` (command receiver) + `BleNotifier` (characteristic updater). Three fully functional GATT services (WiFi, Lichess, Game), typed characteristic handles.
