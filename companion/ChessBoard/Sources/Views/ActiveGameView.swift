@@ -15,15 +15,9 @@ struct ActiveGameView: View {
             Text(statusText)
                 .font(.largeTitle.bold())
 
-            if board.gameState.status == .inProgress {
-                Text(turnText)
-                    .font(.title2)
-                    .foregroundStyle(.secondary)
-            }
-
             Spacer()
 
-            if board.gameState.status == .inProgress,
+            if board.gameStatus == .inProgress,
                 let color = board.resignColor
             {
                 Button("Resign", role: .destructive) {
@@ -43,7 +37,7 @@ struct ActiveGameView: View {
                 }
             }
 
-            if board.gameState.isTerminal {
+            if board.gameStatus.isTerminal {
                 NavigationLink("New Game") {
                     NewGameView()
                 }
@@ -56,35 +50,31 @@ struct ActiveGameView: View {
     }
 
     private var statusText: String {
-        switch board.gameState.status {
+        switch board.gameStatus {
         case .idle: return "No Game"
         case .awaitingPieces: return "Set Up Starting Position"
         case .inProgress: return "In Progress"
-        case .checkmate: return "Checkmate"
+        case .checkmate(let loser):
+            return "Checkmate – \(loser == .white ? "White" : "Black") loses"
         case .stalemate: return "Stalemate"
-        case .resignation: return "Resigned"
-        case .draw: return "Draw"
+        case .resigned(let color):
+            return "\(color == .white ? "White" : "Black") Resigned"
         }
     }
 
-    private var turnText: String {
-        board.gameState.turn == .white ? "White to move" : "Black to move"
-    }
-
     private var statusIcon: String {
-        switch board.gameState.status {
+        switch board.gameStatus {
         case .idle: return "square.dashed"
         case .awaitingPieces: return "checkerboard.rectangle"
         case .inProgress: return "play.fill"
         case .checkmate: return "crown.fill"
         case .stalemate: return "equal.circle.fill"
-        case .resignation: return "flag.fill"
-        case .draw: return "handshake.fill"
+        case .resigned: return "flag.fill"
         }
     }
 
     private var statusColor: Color {
-        switch board.gameState.status {
+        switch board.gameStatus {
         case .idle: return .secondary
         case .awaitingPieces: return .blue
         case .inProgress: return .green
@@ -99,7 +89,7 @@ struct ActiveGameView: View {
         NavigationStack { ActiveGameView() }
             .environment(
                 BoardConnection(
-                    gameState: GameState(status: .awaitingPieces, turn: .white)
+                    gameStatus: .awaitingPieces
                 )
             )
     }
@@ -107,7 +97,7 @@ struct ActiveGameView: View {
         NavigationStack { ActiveGameView() }
             .environment(
                 BoardConnection(
-                    gameState: GameState(status: .inProgress, turn: .white)
+                    gameStatus: .inProgress
                 )
             )
     }
@@ -115,15 +105,15 @@ struct ActiveGameView: View {
         NavigationStack { ActiveGameView() }
             .environment(
                 BoardConnection(
-                    gameState: GameState(status: .checkmate, turn: .black)
+                    gameStatus: .checkmate(loser: .black)
                 )
             )
     }
-    #Preview("Resignation") {
+    #Preview("Resigned") {
         NavigationStack { ActiveGameView() }
             .environment(
                 BoardConnection(
-                    gameState: GameState(status: .resignation, turn: .white)
+                    gameStatus: .resigned(color: .white)
                 )
             )
     }
@@ -131,7 +121,7 @@ struct ActiveGameView: View {
         NavigationStack { ActiveGameView() }
             .environment(
                 BoardConnection(
-                    gameState: GameState(status: .stalemate, turn: .white)
+                    gameStatus: .stalemate
                 )
             )
     }

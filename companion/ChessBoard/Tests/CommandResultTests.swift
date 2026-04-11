@@ -7,7 +7,7 @@ final class CommandResultTests: XCTestCase {
         let result = CommandResult.decode(Data([0x00, 0x00, 0x00]))
         XCTAssertEqual(
             result,
-            CommandResult(ok: true, source: .startGame, message: "")
+            CommandResult(ok: true, source: .startGame, error: nil)
         )
     }
 
@@ -15,34 +15,84 @@ final class CommandResultTests: XCTestCase {
         let result = CommandResult.decode(Data([0x00, 0x01, 0x00]))
         XCTAssertEqual(
             result,
-            CommandResult(ok: true, source: .matchControl, message: "")
+            CommandResult(ok: true, source: .matchControl, error: nil)
         )
     }
 
-    func testDecodeStartGameErrorWithMessage() {
-        // "oops" = [0x6F, 0x6F, 0x70, 0x73]
-        let data = Data([0x01, 0x00, 0x04]) + "oops".data(using: .utf8)!
-        let result = CommandResult.decode(data)
+    func testDecodeSubmitMoveSuccess() {
+        let result = CommandResult.decode(Data([0x00, 0x02, 0x00]))
         XCTAssertEqual(
             result,
-            CommandResult(ok: false, source: .startGame, message: "oops")
+            CommandResult(ok: true, source: .submitMove, error: nil)
         )
     }
 
-    func testDecodeMatchControlErrorWithMessage() {
-        let data = Data([0x01, 0x01, 0x04]) + "oops".data(using: .utf8)!
-        let result = CommandResult.decode(data)
-        XCTAssertEqual(
-            result,
-            CommandResult(ok: false, source: .matchControl, message: "oops")
-        )
-    }
-
-    func testDecodeErrorEmptyMessage() {
+    func testDecodeStartGameErrorGameAlreadyInProgress() {
         let result = CommandResult.decode(Data([0x01, 0x00, 0x00]))
         XCTAssertEqual(
             result,
-            CommandResult(ok: false, source: .startGame, message: "")
+            CommandResult(
+                ok: false,
+                source: .startGame,
+                error: .gameAlreadyInProgress
+            )
+        )
+    }
+
+    func testDecodeMatchControlErrorNoGameInProgress() {
+        let result = CommandResult.decode(Data([0x01, 0x01, 0x01]))
+        XCTAssertEqual(
+            result,
+            CommandResult(
+                ok: false,
+                source: .matchControl,
+                error: .noGameInProgress
+            )
+        )
+    }
+
+    func testDecodeSubmitMoveErrorIllegalMove() {
+        let result = CommandResult.decode(Data([0x01, 0x02, 0x03]))
+        XCTAssertEqual(
+            result,
+            CommandResult(ok: false, source: .submitMove, error: .illegalMove)
+        )
+    }
+
+    func testDecodeSubmitMoveErrorNotYourTurn() {
+        let result = CommandResult.decode(Data([0x01, 0x02, 0x02]))
+        XCTAssertEqual(
+            result,
+            CommandResult(ok: false, source: .submitMove, error: .notYourTurn)
+        )
+    }
+
+    func testDecodeStartGameErrorInvalidCommand() {
+        let result = CommandResult.decode(Data([0x01, 0x00, 0x05]))
+        XCTAssertEqual(
+            result,
+            CommandResult(ok: false, source: .startGame, error: .invalidCommand)
+        )
+    }
+
+    func testDecodeErrorUnknownBoardError() {
+        // Unknown error code → BoardError is nil but result is still valid
+        let result = CommandResult.decode(Data([0x01, 0x00, 0xFF]))
+        XCTAssertEqual(
+            result,
+            CommandResult(ok: false, source: .startGame, error: nil)
+        )
+    }
+
+    func testDecodeCannotResignForRemotePlayer() {
+        let result = CommandResult.decode(Data([0x01, 0x01, 0x04]))
+        XCTAssertEqual(
+            result,
+            CommandResult(
+                ok: false,
+                source: .matchControl,
+                error: .cannotResignForRemotePlayer
+            )
         )
     }
 
@@ -53,14 +103,6 @@ final class CommandResultTests: XCTestCase {
     }
 
     func testDecodeUnknownCommandSource() {
-        // command byte 0xFF is unknown
         XCTAssertNil(CommandResult.decode(Data([0x00, 0xFF, 0x00])))
-    }
-
-    func testDecodeTruncatedMessage() {
-        // msg_len says 4 but only 2 bytes follow (after ok + source + msg_len = 3 header bytes)
-        XCTAssertNil(
-            CommandResult.decode(Data([0x01, 0x00, 0x04, 0x68, 0x69]))
-        )
     }
 }

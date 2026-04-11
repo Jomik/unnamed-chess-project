@@ -8,7 +8,7 @@ struct ContentView: View {
             Group {
                 if board.connectionState != .ready {
                     ScanView()
-                } else if board.gameState.status == .idle {
+                } else if board.gameStatus == .idle {
                     NewGameView()
                 } else {
                     ActiveGameView()
@@ -31,7 +31,7 @@ struct ContentView: View {
         ContentView()
             .environment(
                 BoardConnection(
-                    gameState: GameState(status: .inProgress, turn: .white)
+                    gameStatus: .inProgress
                 )
             )
     }

@@ -36,10 +36,8 @@ extension ConnectionState {
 @Observable
 class BoardConnection {
     var connectionState: ConnectionState = .poweredOff
-    var gameState: GameState = .initial
+    var gameStatus: GameStatus = .idle
     var lastCommandResult: CommandResult?
-    var wifiStatus: WifiStatus = .disconnected
-    var lichessStatus: LichessStatus = .idle
 
     /// Player types for each side, read from firmware on connect.
     /// Used to determine which side is human for resign.
@@ -59,18 +57,14 @@ class BoardConnection {
         /// Commands are no-ops (transport is nil). For use in #Preview macros.
         init(
             connectionState: ConnectionState = .ready,
-            gameState: GameState = .initial,
-            wifiStatus: WifiStatus = .disconnected,
-            lichessStatus: LichessStatus = .idle,
+            gameStatus: GameStatus = .idle,
             lastCommandResult: CommandResult? = nil,
             whitePlayerType: PlayerType? = .human,
-            blackPlayerType: PlayerType? = .embedded
+            blackPlayerType: PlayerType? = .remote
         ) {
             self.transport = nil
             self.connectionState = connectionState
-            self.gameState = gameState
-            self.wifiStatus = wifiStatus
-            self.lichessStatus = lichessStatus
+            self.gameStatus = gameStatus
             self.lastCommandResult = lastCommandResult
             self.whitePlayerType = whitePlayerType
             self.blackPlayerType = blackPlayerType
@@ -87,41 +81,20 @@ class BoardConnection {
         }
     }
 
-    /// Color to resign for. In human-vs-engine, always the human side.
-    /// In human-vs-human, the side whose turn it is.
+    /// Color to resign for. In human-vs-remote, always the human side.
+    /// In human-vs-human, returns nil until color selection is implemented.
     var resignColor: Turn? {
         switch (whitePlayerType, blackPlayerType) {
-        case (.human, .human): return gameState.turn
+        case (.human, .human): return nil
         case (.human, _): return .white
         case (_, .human): return .black
         default: return nil
         }
     }
 
-    func configureWifi(ssid: String, password: String, authMode: WifiAuthMode) {
-        wifiStatus = WifiStatus(state: .connecting, message: "")
-        let config = WifiConfig(
-            ssid: ssid,
-            password: password,
-            authMode: authMode
-        )
-        transport?.write(config.encode(), to: GATT.wifiConfig)
-    }
-
-    func setLichessToken(_ token: String) {
-        let tokenBytes = Array(token.utf8)
-        guard tokenBytes.count <= 255 else { return }
-        lichessStatus = LichessStatus(state: .validating, message: "")
-        var data = Data([UInt8(tokenBytes.count)])
-        data.append(contentsOf: tokenBytes)
-        transport?.write(data, to: GATT.lichessToken)
-    }
-
     func configureAndStart(
         white: PlayerType,
-        whiteLevel: Int = 0,
-        black: PlayerType,
-        blackLevel: Int = 0
+        black: PlayerType
     ) {
         guard connectionState == .ready else { return }
 
@@ -129,14 +102,8 @@ class BoardConnection {
         blackPlayerType = black
         lastCommandResult = nil
 
-        transport?.write(
-            white.encode(level: whiteLevel),
-            to: GATT.whitePlayer
-        )
-        transport?.write(
-            black.encode(level: blackLevel),
-            to: GATT.blackPlayer
-        )
+        transport?.write(white.encode(), to: GATT.whitePlayer)
+        transport?.write(black.encode(), to: GATT.blackPlayer)
         transport?.write(Data(), to: GATT.startGame)
     }
 

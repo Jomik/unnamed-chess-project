@@ -104,8 +104,6 @@ final class BLETransport: NSObject, BoardTransport,
         guard self.peripheral != nil else { return }
         characteristics.removeAll()
         awaitingInitialState = false
-        owner?.wifiStatus = .disconnected
-        owner?.lichessStatus = .idle
         owner?.connectionState = .connecting
         central.connect(peripheral, options: nil)
     }
@@ -122,16 +120,6 @@ final class BLETransport: NSObject, BoardTransport,
             case GATT.gameService:
                 peripheral.discoverCharacteristics(
                     GATT.gameCharacteristics,
-                    for: service
-                )
-            case GATT.wifiService:
-                peripheral.discoverCharacteristics(
-                    GATT.wifiCharacteristics,
-                    for: service
-                )
-            case GATT.lichessService:
-                peripheral.discoverCharacteristics(
-                    GATT.lichessCharacteristics,
                     for: service
                 )
             default:
@@ -172,24 +160,6 @@ final class BLETransport: NSObject, BoardTransport,
             if let bp = characteristics[GATT.blackPlayer] {
                 peripheral.readValue(for: bp)
             }
-        case GATT.wifiService:
-            guard let chars = service.characteristics else { return }
-            for char in chars {
-                characteristics[char.uuid] = char
-                if char.uuid == GATT.wifiStatus {
-                    peripheral.setNotifyValue(true, for: char)
-                    peripheral.readValue(for: char)
-                }
-            }
-        case GATT.lichessService:
-            guard let chars = service.characteristics else { return }
-            for char in chars {
-                characteristics[char.uuid] = char
-                if char.uuid == GATT.lichessStatus {
-                    peripheral.setNotifyValue(true, for: char)
-                    peripheral.readValue(for: char)
-                }
-            }
         default:
             break
         }
@@ -212,8 +182,8 @@ final class BLETransport: NSObject, BoardTransport,
         guard let data = characteristic.value else { return }
         switch characteristic.uuid {
         case GATT.gameState:
-            if let state = GameState.decode(data) {
-                owner?.gameState = state
+            if let status = GameStatus.decode(data) {
+                owner?.gameStatus = status
             }
             // Transition to .ready after we have actual game state
             if awaitingInitialState {
@@ -223,14 +193,6 @@ final class BLETransport: NSObject, BoardTransport,
         case GATT.commandResult:
             if let result = CommandResult.decode(data) {
                 owner?.lastCommandResult = result
-            }
-        case GATT.wifiStatus:
-            if let decoded = WifiStatus.decode(data) {
-                owner?.wifiStatus = decoded
-            }
-        case GATT.lichessStatus:
-            if let decoded = LichessStatus.decode(data) {
-                owner?.lichessStatus = decoded
             }
         case GATT.whitePlayer:
             owner?.whitePlayerType = PlayerType.decode(data)
@@ -246,20 +208,6 @@ final class BLETransport: NSObject, BoardTransport,
         didWriteValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        if error == nil { return }
-        switch characteristic.uuid {
-        case GATT.wifiConfig:
-            owner?.wifiStatus = WifiStatus(
-                state: .failed,
-                message: "Write failed"
-            )
-        case GATT.lichessToken:
-            owner?.lichessStatus = LichessStatus(
-                state: .failed,
-                message: "Write failed"
-            )
-        default:
-            break
-        }
+        // No write-error handling needed for the new protocol.
     }
 }
