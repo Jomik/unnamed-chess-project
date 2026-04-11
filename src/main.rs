@@ -1,21 +1,15 @@
 #[cfg(target_os = "espidf")]
 fn main() {
-    use esp_idf_svc::eventloop::EspSystemEventLoop;
     use esp_idf_svc::hal::adc::oneshot::AdcDriver;
     use esp_idf_svc::hal::delay::FreeRtos;
     use esp_idf_svc::hal::peripherals::Peripherals;
-    use esp_idf_svc::nvs::{EspDefaultNvsPartition, EspNvsPartition, NvsCustom};
-    use esp_idf_svc::wifi::AuthMethod;
+    use esp_idf_svc::nvs::{EspNvsPartition, NvsCustom};
     use shakmaty::{Color, Position};
     use unnamed_chess_project::ble_protocol::{
-        BleCommand, CommandResult, CommandSource, GameState, GameStatus, LichessStatus,
-        PlayerConfig, UNSET_BYTE, WifiAuthMode, WifiStatus,
+        BleCommand, CommandResult, CommandSource, GameState, GameStatus, PlayerConfig, UNSET_BYTE,
     };
     use unnamed_chess_project::esp32::config::{LedPalette, SensorCalibration, SensorConfig};
-    use unnamed_chess_project::esp32::{
-        Esp32LedDisplay, Esp32LichessClient, Esp32PieceSensor, WifiConnection, start_ble,
-    };
-    use unnamed_chess_project::lichess::{LichessConfig, spawn_lichess_opponent};
+    use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, start_ble};
     use unnamed_chess_project::session::GameSession;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
 
@@ -23,10 +17,6 @@ fn main() {
     esp_idf_svc::log::EspLogger::initialize_default();
 
     let peripherals = Peripherals::take().expect("failed to take peripherals");
-
-    let sys_loop = EspSystemEventLoop::take().expect("failed to take system event loop");
-    let nvs_partition = EspDefaultNvsPartition::take().expect("failed to take NVS partition");
-    let mut modem = Some(peripherals.modem);
 
     let mut display = Esp32LedDisplay::new(peripherals.pins.gpio2, LedPalette::default())
         .expect("failed to init LED display");
@@ -74,9 +64,6 @@ fn main() {
 
     let (commands, notifier) = start_ble().expect("failed to start BLE server");
 
-    let mut wifi_connection: Option<WifiConnection<'_>> = None;
-    let mut lichess_token: Option<String> = None;
-
     let mut white_config: Option<PlayerConfig> = None;
     let mut black_config: Option<PlayerConfig> = None;
     let mut session: Option<GameSession> = None;
@@ -119,97 +106,6 @@ fn main() {
                         continue;
                     };
 
-                    // Phase 1: Spawn Lichess opponents (blocking, up to 90s each)
-                    // before waiting for starting position.
-                    let mut white_lichess: Option<Box<dyn unnamed_chess_project::player::Player>> =
-                        None;
-                    let mut black_lichess: Option<Box<dyn unnamed_chess_project::player::Player>> =
-                        None;
-
-                    if let PlayerConfig::LichessAi { level } = w_config {
-                        if wifi_connection.is_none() {
-                            notifier.notify_command_result(&CommandResult::error(
-                                CommandSource::StartGame,
-                                "WiFi not connected",
-                            ));
-                            continue;
-                        }
-                        let Some(ref token) = lichess_token else {
-                            notifier.notify_command_result(&CommandResult::error(
-                                CommandSource::StartGame,
-                                "Lichess token not set",
-                            ));
-                            continue;
-                        };
-                        let client = Esp32LichessClient::new(token.clone());
-                        let config = LichessConfig {
-                            level: *level,
-                            clock_limit: 10800,
-                            clock_increment: 180,
-                        };
-                        match spawn_lichess_opponent(client, config, |f| {
-                            std::thread::Builder::new()
-                                .stack_size(8192)
-                                .spawn(f)
-                                .map(|_| ())
-                                .map_err(|e| e.to_string())
-                        }) {
-                            Ok(opponent) => {
-                                white_lichess = Some(Box::new(opponent));
-                            }
-                            Err(e) => {
-                                log::error!("Failed to spawn white Lichess opponent: {e}");
-                                notifier.notify_command_result(&CommandResult::error(
-                                    CommandSource::StartGame,
-                                    format!("{e}"),
-                                ));
-                                continue;
-                            }
-                        }
-                    }
-
-                    if let PlayerConfig::LichessAi { level } = b_config {
-                        if wifi_connection.is_none() {
-                            notifier.notify_command_result(&CommandResult::error(
-                                CommandSource::StartGame,
-                                "WiFi not connected",
-                            ));
-                            continue;
-                        }
-                        let Some(ref token) = lichess_token else {
-                            notifier.notify_command_result(&CommandResult::error(
-                                CommandSource::StartGame,
-                                "Lichess token not set",
-                            ));
-                            continue;
-                        };
-                        let client = Esp32LichessClient::new(token.clone());
-                        let config = LichessConfig {
-                            level: *level,
-                            clock_limit: 10800,
-                            clock_increment: 180,
-                        };
-                        match spawn_lichess_opponent(client, config, |f| {
-                            std::thread::Builder::new()
-                                .stack_size(8192)
-                                .spawn(f)
-                                .map(|_| ())
-                                .map_err(|e| e.to_string())
-                        }) {
-                            Ok(opponent) => {
-                                black_lichess = Some(Box::new(opponent));
-                            }
-                            Err(e) => {
-                                log::error!("Failed to spawn black Lichess opponent: {e}");
-                                notifier.notify_command_result(&CommandResult::error(
-                                    CommandSource::StartGame,
-                                    format!("{e}"),
-                                ));
-                                continue;
-                            }
-                        }
-                    }
-
                     // Acknowledge the command and notify AwaitingPieces before
                     // entering the blocking setup loop.
                     notifier
@@ -239,18 +135,8 @@ fn main() {
                         };
                     log::info!("Starting position detected");
 
-                    // Phase 2: Create Human/Embedded players (need initial_positions).
-                    // Lichess players were already spawned in phase 1.
-                    let white_player: Box<dyn unnamed_chess_project::player::Player> =
-                        match white_lichess {
-                            Some(p) => p,
-                            None => create_player(w_config, initial_positions),
-                        };
-                    let black_player: Box<dyn unnamed_chess_project::player::Player> =
-                        match black_lichess {
-                            Some(p) => p,
-                            None => create_player(b_config, initial_positions),
-                        };
+                    let white_player = create_player(w_config, initial_positions);
+                    let black_player = create_player(b_config, initial_positions);
 
                     let new_session = GameSession::new(white_player, black_player);
                     let status = new_session.game_state();
@@ -289,47 +175,8 @@ fn main() {
                         ));
                     }
                 }
-                BleCommand::ConfigureWifi(config) => {
-                    log::info!("WiFi config received: ssid={}", config.ssid);
-                    notifier.notify_wifi_status(&WifiStatus::connecting());
-
-                    let Some(mdm) = modem.take() else {
-                        log::error!("WiFi modem already consumed");
-                        notifier.notify_wifi_status(&WifiStatus::failed(
-                            "WiFi modem unavailable, reboot to retry",
-                        ));
-                        continue;
-                    };
-
-                    let auth_method = match config.auth_mode {
-                        WifiAuthMode::Open => AuthMethod::None,
-                        WifiAuthMode::Wpa2 => AuthMethod::WPA2Personal,
-                        WifiAuthMode::Wpa3 => AuthMethod::WPA3Personal,
-                    };
-
-                    match WifiConnection::connect(
-                        mdm,
-                        sys_loop.clone(),
-                        nvs_partition.clone(),
-                        &config.ssid,
-                        &config.password,
-                        auth_method,
-                    ) {
-                        Ok(conn) => {
-                            log::info!("WiFi connected successfully");
-                            wifi_connection = Some(conn);
-                            notifier.notify_wifi_status(&WifiStatus::connected());
-                        }
-                        Err(e) => {
-                            log::error!("WiFi connection failed: {e}");
-                            notifier.notify_wifi_status(&WifiStatus::failed(e.to_string()));
-                        }
-                    }
-                }
-                BleCommand::SetLichessToken(token) => {
-                    log::info!("Lichess token received ({} chars)", token.len());
-                    lichess_token = Some(token);
-                    notifier.notify_lichess_status(&LichessStatus::connected());
+                BleCommand::ConfigureWifi(_) | BleCommand::SetLichessToken(_) => {
+                    log::info!("Deprecated command ignored");
                 }
             }
         }
@@ -445,21 +292,20 @@ where
     }
 }
 
-/// Panics on `LichessAi` -- callers must reject it beforehand.
 #[cfg(target_os = "espidf")]
 fn create_player(
     config: &unnamed_chess_project::ble_protocol::PlayerConfig,
     initial_positions: shakmaty::ByColor<shakmaty::Bitboard>,
 ) -> Box<dyn unnamed_chess_project::player::Player> {
     use unnamed_chess_project::ble_protocol::PlayerConfig;
-    use unnamed_chess_project::player::{EmbeddedEngine, HumanPlayer};
+    use unnamed_chess_project::player::HumanPlayer;
 
     match config {
         PlayerConfig::Human => Box::new(HumanPlayer::new(initial_positions)),
-        PlayerConfig::Embedded => Box::new(EmbeddedEngine::new(unsafe {
-            esp_idf_svc::sys::esp_random()
-        })),
-        PlayerConfig::LichessAi { .. } => unreachable!(),
+        PlayerConfig::Embedded | PlayerConfig::LichessAi { .. } => {
+            log::error!("Unsupported player config: {config:?}, falling back to Human");
+            Box::new(HumanPlayer::new(initial_positions))
+        }
     }
 }
 
