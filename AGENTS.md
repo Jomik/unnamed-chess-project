@@ -4,7 +4,7 @@ Project-specific instructions for AI coding agents working in this repository.
 
 ## Project Overview
 
-ESP32-S3 smart chess board firmware in Rust, plus an iOS companion app (SwiftUI + CoreBluetooth). Hall-effect sensors detect per-color piece positions; LEDs provide move feedback. Uses `shakmaty` for chess logic. The companion app connects via BLE to configure players, send WiFi/Lichess credentials, and start games. Supports human-vs-human, human-vs-embedded-engine, and human-vs-Lichess-AI modes.
+ESP32-S3 smart chess board firmware in Rust, plus an iOS companion app (SwiftUI + CoreBluetooth). Hall-effect sensors detect per-color piece positions; LEDs provide move feedback. Uses `shakmaty` for chess logic. The companion app connects via BLE to configure players and start games. Supports human-vs-human and human-vs-remote (companion-managed AI or Lichess) modes.
 
 ## Build and Test Commands
 
@@ -87,7 +87,7 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 
 - **player/mod.rs** — `Player` trait (`poll_move`, `opponent_moved`, `is_interactive`, `notify`), `PlayerStatus` enum, `GameAction` enum for game-level actions (resign, future draw/takeback)
 - **player/human.rs** — `HumanPlayer`: detects moves from sensor bitboards by matching against legal moves
-- **player/embedded.rs** — `EmbeddedEngine`: heuristic AI (captures > castling > promotions > random)
+- **player/remote.rs** — `RemotePlayer`: receives moves from an external source (e.g. BLE SubmitMove) via an mpsc channel
 - **feedback.rs** — `compute_feedback` and `compute_state_feedback`: feedback from position + sensors. Recovery guidance is integrated as a fallback path.
 - **board_api.rs** — Transport-agnostic domain types from `docs/board-api.md`: `GameStatus`, `PlayerType`, `BoardApiError`. `GameSession` returns these directly; BLE encoding lives in `ble_protocol`.
 - **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame; also exposes `resign()`, `is_game_over()`, and `game_state()` for game lifecycle management
@@ -95,7 +95,6 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **esp32/sensor.rs** — `Esp32PieceSensor`: ADC + mux scanning, `RawScan` for raw millivolt readings, `read_raw()` primitive
 - **esp32/ble.rs** — `start_ble()` initializes NimBLE and returns `BleCommands` (command receiver) + `BleNotifier` (characteristic updater). Three fully functional GATT services (WiFi, Lichess, Game), typed characteristic handles.
 - **esp32/config.rs** — `SensorCalibration` NVS load/save (cal partition), `CalibrationError`, `SensorConfig`, `LedPalette`, `Rgb8` display/sensor configuration types
-- **lichess.rs** — Lichess API integration: challenge creation, NDJSON game stream, `LichessOpponent` implements `Player` with resign propagation via shared `AtomicBool` flag
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
 - **testutil/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests
 
@@ -120,7 +119,7 @@ Used by `ScriptedSensor` in `testutil/script.rs` and extensively in `player/huma
 
 ## Provisioning
 
-On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE, sends WiFi credentials and Lichess API token each session (nothing persisted to NVS), and starts games. Only sensor calibration data is persisted to NVS (in the separate `cal` partition). The companion app persists WiFi credentials and Lichess token to the iOS Keychain, and last-used player config (type + level) to UserDefaults. Saved credentials are auto-sent on reconnect when a Lichess game is configured.
+On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE, configures players, and starts games. Only sensor calibration data is persisted to NVS (in the separate `cal` partition). The companion app persists last-used player config to UserDefaults. WiFi/Lichess handling has moved to the companion app.
 
 `just erase-nvs` clears the main NVS partition. It does not affect sensor calibration.
 

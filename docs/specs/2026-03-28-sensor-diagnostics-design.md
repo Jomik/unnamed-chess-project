@@ -57,7 +57,7 @@ Both `SensorConfig` and `SensorCalibration` derive `Copy` since they contain onl
 
 Add NVS `load`/`save` methods following the existing `BoardConfig` pattern in `esp32/provisioning.rs`. Store both `u16` fields using `get_u16`/`set_u16` (available in `esp-idf-svc` via the ESP-IDF NVS API), with keys `"cal_baseline"` and `"cal_threshold"`.
 
-Calibration data lives in a **separate NVS partition** (`cal`) from the main config partition (`nvs`). This ensures `just erase-nvs` (which erases the `nvs` partition to trigger WiFi/Lichess reprovisioning) does not wipe calibration data. Calibration is board-specific hardware data with a different lifecycle from user config — it should survive reprovisioning. Add the `cal` partition to `partitions.csv`.
+Calibration data lives in a **separate NVS partition** (`cal`) from the main config partition (`nvs`). This ensures `just erase-nvs` (which erases the `nvs` partition) does not wipe calibration data. Calibration is board-specific hardware data with a different lifecycle from user config — it should survive reprovisioning. Add the `cal` partition to `partitions.csv`.
 
 `SensorCalibration::load`/`save` take an `EspNvsPartition<NvsCustom>` (obtained via `EspNvsPartition::<NvsCustom>::take("cal")`) and open their own `EspNvs<NvsCustom>` handle internally, rather than sharing the `"config"` handle used by `BoardConfig`.
 
