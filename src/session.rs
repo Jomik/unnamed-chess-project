@@ -1,7 +1,7 @@
 use shakmaty::{Bitboard, ByColor, Chess, Color, Move, Position};
 
 use crate::board_api::GameStatus;
-use crate::feedback::{compute_feedback, compute_state_feedback, BoardFeedback, StatusKind};
+use crate::feedback::{BoardFeedback, StatusKind, compute_feedback, compute_state_feedback};
 use crate::player::{GameAction, Player, PlayerStatus};
 
 #[derive(Debug, Clone)]

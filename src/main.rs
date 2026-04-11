@@ -9,13 +9,13 @@ fn main() {
     use shakmaty::{Color, Position};
     use unnamed_chess_project::ble_protocol::{
         BleCommand, CommandResult, CommandSource, GameState, GameStatus, LichessStatus,
-        PlayerConfig, WifiAuthMode, WifiStatus, UNSET_BYTE,
+        PlayerConfig, UNSET_BYTE, WifiAuthMode, WifiStatus,
     };
     use unnamed_chess_project::esp32::config::{LedPalette, SensorCalibration, SensorConfig};
     use unnamed_chess_project::esp32::{
-        start_ble, Esp32LedDisplay, Esp32LichessClient, Esp32PieceSensor, WifiConnection,
+        Esp32LedDisplay, Esp32LichessClient, Esp32PieceSensor, WifiConnection, start_ble,
     };
-    use unnamed_chess_project::lichess::{spawn_lichess_opponent, LichessConfig};
+    use unnamed_chess_project::lichess::{LichessConfig, spawn_lichess_opponent};
     use unnamed_chess_project::session::GameSession;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
 
