@@ -99,9 +99,21 @@ final class BoardConnectionTests: XCTestCase {
     }
 
     func testResignColorHumanVsHuman() {
-        // In human-vs-human, resign is not available (no turn tracking)
         let board = BoardConnection(
             connectionState: .ready,
+            gameStatus: .inProgress,
+            currentPosition:
+                "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+            whitePlayerType: .human,
+            blackPlayerType: .human
+        )
+        XCTAssertEqual(board.resignColor, .black)
+    }
+
+    func testResignColorHumanVsHumanNoPosition() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            gameStatus: .inProgress,
             whitePlayerType: .human,
             blackPlayerType: .human
         )

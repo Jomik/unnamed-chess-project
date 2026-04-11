@@ -45,10 +45,10 @@ class BoardConnection {
     var blackPlayerType: PlayerType?
 
     /// Current board position as FEN string, updated from position characteristic.
-    var currentPosition: String = ""
+    var currentPosition: String?
 
     /// Last move played: (color: Turn, uci: String).
-    var lastMove: (Turn, String)? = nil
+    var lastMove: (color: Turn, uci: String)?
 
     private var transport: BoardTransport?
 
@@ -64,6 +64,7 @@ class BoardConnection {
         init(
             connectionState: ConnectionState = .ready,
             gameStatus: GameStatus = .idle,
+            currentPosition: String? = nil,
             lastCommandResult: CommandResult? = nil,
             whitePlayerType: PlayerType? = .human,
             blackPlayerType: PlayerType? = .remote
@@ -71,6 +72,7 @@ class BoardConnection {
             self.transport = nil
             self.connectionState = connectionState
             self.gameStatus = gameStatus
+            self.currentPosition = currentPosition
             self.lastCommandResult = lastCommandResult
             self.whitePlayerType = whitePlayerType
             self.blackPlayerType = blackPlayerType
@@ -88,14 +90,22 @@ class BoardConnection {
     }
 
     /// Color to resign for. In human-vs-remote, always the human side.
-    /// In human-vs-human, returns nil until color selection is implemented.
+    /// In human-vs-human, the side whose turn it is.
     var resignColor: Turn? {
         switch (whitePlayerType, blackPlayerType) {
-        case (.human, .human): return nil
+        case (.human, .human): return activeTurn
         case (.human, _): return .white
         case (_, .human): return .black
         default: return nil
         }
+    }
+
+    /// Derives the active color from the current FEN position.
+    private var activeTurn: Turn? {
+        guard let fen = currentPosition else { return nil }
+        let components = fen.split(separator: " ")
+        guard components.count >= 2 else { return nil }
+        return components[1] == "w" ? .white : .black
     }
 
     func configureAndStart(
@@ -108,9 +118,10 @@ class BoardConnection {
         blackPlayerType = black
         lastCommandResult = nil
 
-        transport?.write(white.encode(), to: GATT.whitePlayer)
-        transport?.write(black.encode(), to: GATT.blackPlayer)
-        transport?.write(Data(), to: GATT.startGame)
+        transport?.write(
+            Data([white.rawValue, black.rawValue]),
+            to: GATT.startGame
+        )
     }
 
     /// Sends a resign command via Match Control.
@@ -119,6 +130,26 @@ class BoardConnection {
     func resign(color: Turn) {
         lastCommandResult = nil
         transport?.write(Data([0x00, color.rawValue]), to: GATT.matchControl)
+    }
+
+    /// Sends a cancel/abort command via Match Control.
+    ///
+    /// Wire format: `[action: u8 (0x01 = cancel)]`
+    func cancelGame() {
+        lastCommandResult = nil
+        transport?.write(Data([0x01]), to: GATT.matchControl)
+    }
+
+    /// Sends a move to the board.
+    ///
+    /// Wire format: `[length: u8, ...uci_bytes]`
+    func submitMove(_ uci: String) {
+        let bytes = Array(uci.utf8)
+        guard bytes.count <= 255 else { return }
+        lastCommandResult = nil
+        var data = Data([UInt8(bytes.count)])
+        data.append(contentsOf: bytes)
+        transport?.write(data, to: GATT.submitMove)
     }
 
     /// Handles a move played notification from the board.
