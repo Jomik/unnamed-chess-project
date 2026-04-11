@@ -66,16 +66,19 @@ Gate hardware-specific code with `#[cfg(target_os = "espidf")]`. Never mix impor
 
 ```
 BleCommands (mpsc channel) → BleCommand
-    → main.rs drains commands each tick (start game, resign, query state)
+    → main.rs orchestrates BoardState state machine: Idle → AwaitingPieces → InProgress
+    → BLE commands are drained each tick regardless of state
+    → In AwaitingPieces, sensors are checked non-blockingly for starting position
+    → session.tick() is only called in InProgress state
     → BleNotifier pushes state back to characteristics
 PieceSensor::read_positions() → ByColor<Bitboard>
-    → GameSession::tick(sensors) → TickResult
+    → GameSession::tick(sensors) → TickResult (only when InProgress)
         → Player::poll_move() detects/computes move
         → compute_feedback(position, sensors, reference_sensors) → BoardFeedback
             → BoardDisplay::show(&feedback)
 ```
 
-**GameSession** (`session.rs`) orchestrates the per-tick sequence: poll active player → apply move → notify opponent → compute feedback. `main.rs` also drains `BleCommand`s from the BLE server each tick before calling `session.tick()`.
+**GameSession** (`session.rs`) orchestrates the per-tick sequence: poll active player → apply move → notify opponent → compute feedback. `main.rs` also manages the `BoardState` state machine: transitions from Idle (no game) to AwaitingPieces (waiting for start position setup) to InProgress (game is active). BLE commands are drained every tick regardless of state.
 
 ### Key Abstractions
 
