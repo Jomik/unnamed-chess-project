@@ -103,7 +103,7 @@ Without calibration, the firmware falls back to conservative defaults that may n
 
 ### Lichess Integration
 
-Lichess AI is available via the companion app. Connect the board to WiFi and provide a Lichess API token in the app to play against Lichess AI opponents. The board also has a built-in heuristic engine for offline computer play.
+Lichess AI and other externally-managed opponents are available via the companion app. The board uses `RemotePlayer` to receive moves from an external source (the companion app or your own controller). This architecture allows the companion app to handle WiFi, API integration, and opponent management while the board focuses on piece detection and move validation.
 
 ## Development
 

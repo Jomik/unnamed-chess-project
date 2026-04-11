@@ -59,8 +59,8 @@ impl GameSession {
 
         self.resigned = Some(color);
         let action = GameAction::Resign(color);
-        // Broadcast to both players. Currently all players inherit the
-        // default no-op; LichessOpponent will override this in a later task.
+        // Broadcast to both players so external players (e.g. RemotePlayer)
+        // can propagate the action upstream.
         self.white.notify(&action);
         self.black.notify(&action);
         true
