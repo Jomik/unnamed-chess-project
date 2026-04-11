@@ -82,15 +82,16 @@ Game lifecycle and state. The core of the protocol (UUID prefix 1xxx).
 | White Player       | Read, Write  | Tagged binary: type byte + type-specific config (see below)  |
 | Black Player       | Read, Write  | Same format as White Player                                  |
 | Start Game         | Write        | Empty (trigger)                                              |
-| Match Control      | Write        | Action (u8: 0x00=resign), player (u8: 0x00=white, 0x01=black) |
+| Match Control      | Write        | Action-based variable-length payload (see Match Control action format below) |
 | Game State         | Read, Notify | Status (u8), turn (u8: 0x00=white, 0x01=black). Both fields are always present regardless of game status. The `turn` field reflects the side to move — it is not reinterpreted based on game outcome. In checkmate/stalemate this is the checkmated/stalemated side; in resignation/draw it is whoever's turn it was when the game ended. |
 | Command Result     | Read, Notify | Status code (u8: 0x00=ok, 0x01=error), command source (u8: 0x00=StartGame, 0x01=MatchControl), error message (length-prefixed string, empty if ok) |
 
-**Match Control action values:**
+**Match Control action values and payload format:**
 
-| Value | Action           |
-| ----- | ---------------- |
-| 0x00  | Resign           |
+| Value | Action          | Payload Format       |
+| ----- | --------------- | -------------------- |
+| 0x00  | Resign          | `[0x00, color: u8]` where color is `0x00`=white, `0x01`=black |
+| 0x01  | Cancel Game     | `[0x01]` (no additional bytes) |
 
 **Command source values:**
 
@@ -106,7 +107,9 @@ Game lifecycle and state. The core of the protocol (UUID prefix 1xxx).
 **Command Result behavior:** Every write to Start Game or Match Control produces a Command Result notification — `[0x00, source, 0x00]` on success, `[0x01, source, msg_len, msg...]` on failure. The `source` byte echoes which command produced the result, allowing the app to correlate responses without tracking state. Error conditions include:
 - Start Game written before both players are configured (either still reads `0xFF`)
 - Start Game written while a game is already in progress
-- Match Control written when no game is in progress
+- Match Control (Resign) written when no game is in progress
+- Match Control (CancelGame) written when no game is in progress → error "no game in progress"
+- Match Control (CancelGame) in AwaitingPieces or InProgress state → success, resets board to Idle
 - Lichess AI level out of range (must be 1–8)
 - Unrecognized action or player type values
 
@@ -163,6 +166,13 @@ App writes Start Game    → (empty)
 App writes Match Control → [0x00] [0x00]                 (resign, white)
 Board notifies Command Result → [0x00] [0x01] [0x00]     (ok, MatchControl, no message)
 Board notifies Game State → [0x05] ...                  (resignation)
+```
+
+**Cancelling a game:**
+```
+App writes Match Control → [0x01]                        (cancel game)
+Board notifies Command Result → [0x00] [0x01] [0x00]     (ok, MatchControl, no message)
+Board notifies Game State → [0x00] ...                  (idle)
 ```
 
 

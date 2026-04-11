@@ -123,6 +123,7 @@ pub enum BleCommand {
     SetWhitePlayer(PlayerConfig),
     SetBlackPlayer(PlayerConfig),
     StartGame,
+    CancelGame,
     Resign { color: Color },
     ConfigureWifi(WifiConfig),
     SetLichessToken(String),
@@ -131,20 +132,27 @@ pub enum BleCommand {
 impl BleCommand {
     /// Parse a Match Control characteristic write.
     ///
-    /// Format: `[action: u8, player: u8]`
-    /// - action `0x00` = resign
-    /// - player `0x00` = white, `0x01` = black
+    /// Format: `[action: u8, ...]`
+    /// - action `0x00` = resign → `[0x00, color: u8]`
+    /// - action `0x01` = cancel game → `[0x01]`
     pub fn parse_match_control(bytes: &[u8]) -> Result<Self, ProtocolError> {
-        if bytes.len() < 2 {
-            return Err(ProtocolError::InsufficientData {
-                needed: 2,
-                got: bytes.len(),
-            });
+        if bytes.is_empty() {
+            return Err(ProtocolError::InsufficientData { needed: 1, got: 0 });
         }
         let action = bytes[0];
-        let color = parse_color(bytes[1])?;
         match action {
-            0x00 => Ok(BleCommand::Resign { color }),
+            0x00 => {
+                // Resign: [0x00, color: u8]
+                if bytes.len() < 2 {
+                    return Err(ProtocolError::InsufficientData {
+                        needed: 2,
+                        got: bytes.len(),
+                    });
+                }
+                let color = parse_color(bytes[1])?;
+                Ok(BleCommand::Resign { color })
+            }
+            0x01 => Ok(BleCommand::CancelGame),
             other => Err(ProtocolError::UnknownAction(other)),
         }
     }
@@ -659,9 +667,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_cancel_game() {
+        let result = BleCommand::parse_match_control(&[0x01]);
+        assert_eq!(result, Ok(BleCommand::CancelGame));
+    }
+
+    #[test]
+    fn parse_cancel_game_with_extra_bytes() {
+        // Extra bytes after action byte should be ignored
+        let result = BleCommand::parse_match_control(&[0x01, 0xFF]);
+        assert_eq!(result, Ok(BleCommand::CancelGame));
+    }
+
+    #[test]
     fn reject_unknown_action() {
-        let result = BleCommand::parse_match_control(&[0x01, 0x00]);
-        assert!(matches!(result, Err(ProtocolError::UnknownAction(0x01))));
+        let result = BleCommand::parse_match_control(&[0x02, 0x00]);
+        assert!(matches!(result, Err(ProtocolError::UnknownAction(0x02))));
     }
 
     #[test]
@@ -684,7 +705,7 @@ mod tests {
         let result = BleCommand::parse_match_control(&[]);
         assert!(matches!(
             result,
-            Err(ProtocolError::InsufficientData { needed: 2, got: 0 })
+            Err(ProtocolError::InsufficientData { needed: 1, got: 0 })
         ));
     }
 

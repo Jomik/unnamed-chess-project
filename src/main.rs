@@ -1,4 +1,16 @@
 #[cfg(target_os = "espidf")]
+enum BoardState {
+    Idle,
+    AwaitingPieces {
+        white_config: unnamed_chess_project::ble_protocol::PlayerConfig,
+        black_config: unnamed_chess_project::ble_protocol::PlayerConfig,
+    },
+    InProgress {
+        session: unnamed_chess_project::session::GameSession,
+    },
+}
+
+#[cfg(target_os = "espidf")]
 fn main() {
     use esp_idf_svc::hal::adc::oneshot::AdcDriver;
     use esp_idf_svc::hal::delay::FreeRtos;
@@ -10,7 +22,8 @@ fn main() {
     };
     use unnamed_chess_project::esp32::config::{LedPalette, SensorCalibration, SensorConfig};
     use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, start_ble};
-    use unnamed_chess_project::session::GameSession;
+    use unnamed_chess_project::feedback::BoardFeedback;
+    use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
 
     esp_idf_svc::sys::link_patches();
@@ -66,7 +79,7 @@ fn main() {
 
     let mut white_config: Option<PlayerConfig> = None;
     let mut black_config: Option<PlayerConfig> = None;
-    let mut session: Option<GameSession> = None;
+    let mut board_state = BoardState::Idle;
     let mut prev_positions = None;
     let mut prev_game_state: Option<GameState> = None;
 
@@ -88,7 +101,7 @@ fn main() {
                     black_config = Some(config);
                 }
                 BleCommand::StartGame => {
-                    if session.is_some() {
+                    if !matches!(board_state, BoardState::Idle) {
                         log::warn!("StartGame received while game is active");
                         notifier.notify_command_result(&CommandResult::error(
                             CommandSource::StartGame,
@@ -106,8 +119,6 @@ fn main() {
                         continue;
                     };
 
-                    // Acknowledge the command and notify AwaitingPieces before
-                    // entering the blocking setup loop.
                     notifier
                         .notify_command_result(&CommandResult::success(CommandSource::StartGame));
                     let awaiting_state = GameState {
@@ -115,51 +126,45 @@ fn main() {
                         turn: Color::White,
                     };
                     notifier.notify_game_state(&awaiting_state);
-
+                    board_state = BoardState::AwaitingPieces {
+                        white_config: w_config.clone(),
+                        black_config: b_config.clone(),
+                    };
                     log::info!("Waiting for starting position...");
-                    let initial_positions =
-                        match wait_for_starting_position(&mut sensor, &mut display) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                log::error!("Initial sensor read failed: {e}");
-                                // Reset to Idle since setup failed.
-                                let idle_state = GameState::idle();
-                                notifier.notify_command_result(&CommandResult::error(
-                                    CommandSource::StartGame,
-                                    "sensor read failed",
-                                ));
-                                notifier.notify_game_state(&idle_state);
-                                prev_game_state = Some(idle_state);
-                                continue;
-                            }
-                        };
-                    log::info!("Starting position detected");
-
-                    let white_player = create_player(w_config, initial_positions);
-                    let black_player = create_player(b_config, initial_positions);
-
-                    let new_session = GameSession::new(white_player, black_player);
-                    let status = new_session.game_state();
-                    let ble_state = to_ble_game_state(&status, new_session.position().turn());
-                    notifier.notify_game_state(&ble_state);
-                    prev_game_state = Some(ble_state);
-
-                    session = Some(new_session);
-                    prev_positions = Some(initial_positions);
-
-                    log::info!("Game started");
                 }
+                BleCommand::CancelGame => match board_state {
+                    BoardState::Idle => {
+                        notifier.notify_command_result(&CommandResult::error(
+                            CommandSource::MatchControl,
+                            "no game in progress",
+                        ));
+                    }
+                    _ => {
+                        board_state = BoardState::Idle;
+                        white_config = None;
+                        black_config = None;
+                        prev_positions = None;
+                        prev_game_state = None;
+                        notifier.notify_command_result(&CommandResult::success(
+                            CommandSource::MatchControl,
+                        ));
+                        notifier.notify_game_state(&GameState::idle());
+                        notifier.update_player_config(Color::White, &[UNSET_BYTE]);
+                        notifier.update_player_config(Color::Black, &[UNSET_BYTE]);
+                        log::info!("Game cancelled");
+                    }
+                },
                 BleCommand::Resign { color } => {
-                    if let Some(ref mut s) = session {
-                        if s.resign(color) {
+                    if let BoardState::InProgress { ref mut session } = board_state {
+                        if session.resign(color) {
                             log::info!("{color:?} resigns");
-                            let status = s.game_state();
-                            let ble_state = to_ble_game_state(&status, s.position().turn());
+                            let state =
+                                to_ble_game_state(&session.game_state(), session.position().turn());
                             notifier.notify_command_result(&CommandResult::success(
                                 CommandSource::MatchControl,
                             ));
-                            notifier.notify_game_state(&ble_state);
-                            prev_game_state = Some(ble_state);
+                            notifier.notify_game_state(&state);
+                            prev_game_state = Some(state);
                         } else {
                             log::warn!("Resign rejected for {color:?}");
                             notifier.notify_command_result(&CommandResult::error(
@@ -181,7 +186,59 @@ fn main() {
             }
         }
 
-        if let Some(ref mut s) = session {
+        if let BoardState::AwaitingPieces {
+            ref white_config,
+            ref black_config,
+        } = board_state
+        {
+            let positions = match sensor.read_positions() {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!("Sensor read failed: {e}");
+                    FreeRtos::delay_ms(100);
+                    continue;
+                }
+            };
+            match setup_feedback(&positions) {
+                Some(fb) => {
+                    if let Err(e) = display.show(&fb) {
+                        log::warn!("LED update failed: {e}");
+                    }
+                }
+                None => {
+                    // Starting position detected — create session
+                    if let Err(e) = display.show(&BoardFeedback::default()) {
+                        log::warn!("LED clear failed: {e}");
+                    }
+                    let initial = match sensor.read_positions() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::error!("Initial sensor read failed: {e}");
+                            board_state = BoardState::Idle;
+                            notifier.notify_game_state(&GameState::idle());
+                            continue;
+                        }
+                    };
+                    let white_player = create_player(white_config, initial);
+                    let black_player = create_player(black_config, initial);
+                    let new_session = unnamed_chess_project::session::GameSession::new(
+                        white_player,
+                        black_player,
+                    );
+                    let state =
+                        to_ble_game_state(&new_session.game_state(), new_session.position().turn());
+                    notifier.notify_game_state(&state);
+                    prev_game_state = Some(state);
+                    prev_positions = Some(initial);
+                    board_state = BoardState::InProgress {
+                        session: new_session,
+                    };
+                    log::info!("Starting position detected, game started");
+                }
+            }
+        }
+
+        if let BoardState::InProgress { ref mut session } = board_state {
             let positions = match sensor.read_positions() {
                 Ok(p) => p,
                 Err(e) => {
@@ -194,7 +251,7 @@ fn main() {
             log_sensor_changes(prev_positions, positions);
             prev_positions = Some(positions);
 
-            let result = s.tick(positions);
+            let result = session.tick(positions);
 
             if let Some(mv) = &result.last_move {
                 log::info!("Move played: {mv}");
@@ -204,19 +261,19 @@ fn main() {
                 log::warn!("LED update failed: {e}");
             }
 
-            let current_status = s.game_state();
-            let current_ble_state = to_ble_game_state(&current_status, s.position().turn());
+            let current_status = session.game_state();
+            let current_ble_state = to_ble_game_state(&current_status, session.position().turn());
             let state_changed = prev_game_state.as_ref() != Some(&current_ble_state);
             if state_changed {
                 notifier.notify_game_state(&current_ble_state);
                 prev_game_state = Some(current_ble_state);
             }
 
-            if s.is_game_over() {
-                let final_status = s.game_state();
+            if session.is_game_over() {
+                let final_status = session.game_state();
                 log::info!("Game over: {:?}", final_status);
 
-                session = None;
+                board_state = BoardState::Idle;
                 white_config = None;
                 black_config = None;
                 prev_positions = None;
@@ -250,45 +307,6 @@ fn to_ble_game_state(
     GameState {
         status: ble_status,
         turn,
-    }
-}
-
-#[cfg(target_os = "espidf")]
-fn wait_for_starting_position<S, D>(
-    sensor: &mut S,
-    display: &mut D,
-) -> Result<shakmaty::ByColor<shakmaty::Bitboard>, S::Error>
-where
-    S: unnamed_chess_project::PieceSensor,
-    D: unnamed_chess_project::BoardDisplay,
-{
-    use esp_idf_svc::hal::delay::FreeRtos;
-    use unnamed_chess_project::feedback::BoardFeedback;
-    use unnamed_chess_project::setup::setup_feedback;
-
-    loop {
-        let positions = match sensor.read_positions() {
-            Ok(p) => p,
-            Err(e) => {
-                log::warn!("Sensor read failed: {e}");
-                FreeRtos::delay_ms(100);
-                continue;
-            }
-        };
-        match setup_feedback(&positions) {
-            Some(fb) => {
-                if let Err(e) = display.show(&fb) {
-                    log::warn!("LED update failed: {e}");
-                }
-                FreeRtos::delay_ms(50);
-            }
-            None => {
-                if let Err(e) = display.show(&BoardFeedback::default()) {
-                    log::warn!("LED clear failed: {e}");
-                }
-                return sensor.read_positions();
-            }
-        }
     }
 }
 
