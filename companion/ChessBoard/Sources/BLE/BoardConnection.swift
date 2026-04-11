@@ -44,6 +44,12 @@ class BoardConnection {
     var whitePlayerType: PlayerType?
     var blackPlayerType: PlayerType?
 
+    /// Current board position as FEN string, updated from position characteristic.
+    var currentPosition: String = ""
+
+    /// Last move played: (color: Turn, uci: String).
+    var lastMove: (Turn, String)? = nil
+
     private var transport: BoardTransport?
 
     /// Production initializer. Callers must provide the transport explicitly.
@@ -113,6 +119,11 @@ class BoardConnection {
     func resign(color: Turn) {
         lastCommandResult = nil
         transport?.write(Data([0x00, color.rawValue]), to: GATT.matchControl)
+    }
+
+    /// Handles a move played notification from the board.
+    func handleMovePlayed(color: Turn, uci: String) {
+        lastMove = (color, uci)
     }
 
     func restartScanning() {

@@ -2,7 +2,7 @@ import XCTest
 
 @testable import ChessBoard
 
-final class GameStateTests: XCTestCase {
+final class GameStatusTests: XCTestCase {
     func testDecodeIdle() {
         XCTAssertEqual(GameStatus.decode(Data([0x00])), .idle)
     }

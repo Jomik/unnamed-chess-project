@@ -140,14 +140,18 @@ final class BLETransport: NSObject, BoardTransport,
             }
             for char in chars {
                 characteristics[char.uuid] = char
-                if char.uuid == GATT.gameState
+                // Subscribe to notifications for status and move events
+                if char.uuid == GATT.gameStatus
                     || char.uuid == GATT.commandResult
+                    || char.uuid == GATT.position
+                    || char.uuid == GATT.lastMove
+                    || char.uuid == GATT.movePlayed
                 {
                     peripheral.setNotifyValue(true, for: char)
                 }
             }
             // Read current game state once after discovery to seed the UI before transitioning to .ready.
-            if let gs = characteristics[GATT.gameState],
+            if let gs = characteristics[GATT.gameStatus],
                 !awaitingInitialState,
                 owner?.connectionState != .ready
             {
@@ -159,6 +163,12 @@ final class BLETransport: NSObject, BoardTransport,
             }
             if let bp = characteristics[GATT.blackPlayer] {
                 peripheral.readValue(for: bp)
+            }
+            if let pos = characteristics[GATT.position] {
+                peripheral.readValue(for: pos)
+            }
+            if let lm = characteristics[GATT.lastMove] {
+                peripheral.readValue(for: lm)
             }
         default:
             break
@@ -181,7 +191,7 @@ final class BLETransport: NSObject, BoardTransport,
         }
         guard let data = characteristic.value else { return }
         switch characteristic.uuid {
-        case GATT.gameState:
+        case GATT.gameStatus:
             if let status = GameStatus.decode(data) {
                 owner?.gameStatus = status
             }
@@ -198,8 +208,48 @@ final class BLETransport: NSObject, BoardTransport,
             owner?.whitePlayerType = PlayerType.decode(data)
         case GATT.blackPlayer:
             owner?.blackPlayerType = PlayerType.decode(data)
+        case GATT.position:
+            if data.isEmpty {
+                owner?.currentPosition = nil
+            } else if let positionString = String(data: data, encoding: .utf8) {
+                owner?.currentPosition = positionString
+            }
+        case GATT.lastMove:
+            if data.isEmpty {
+                owner?.lastMove = nil
+            } else {
+                decodeAndHandleMove(
+                    data: data,
+                    handler: { color, uci in
+                        owner?.lastMove = (color, uci)
+                    }
+                )
+            }
+        case GATT.movePlayed:
+            decodeAndHandleMove(
+                data: data,
+                handler: { color, uci in
+                    owner?.handleMovePlayed(color: color, uci: uci)
+                }
+            )
         default:
             break
+        }
+    }
+
+    private func decodeAndHandleMove(
+        data: Data,
+        handler: (Turn, String) -> Void
+    ) {
+        guard data.count >= 3,
+            let colorByte = data.first,
+            let color = Turn(rawValue: colorByte),
+            let uciLen = data.dropFirst().first,
+            data.count >= 2 + Int(uciLen)
+        else { return }
+        let uciBytes = data.dropFirst(2).prefix(Int(uciLen))
+        if let uciString = String(bytes: uciBytes, encoding: .utf8) {
+            handler(color, uciString)
         }
     }
 
