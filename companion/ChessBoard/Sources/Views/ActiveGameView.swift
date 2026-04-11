@@ -15,7 +15,17 @@ struct ActiveGameView: View {
             Text(statusText)
                 .font(.largeTitle.bold())
 
+            if board.gameStatus == .inProgress {
+                Text(turnText)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+
             Spacer()
+
+            if board.gameStatus == .awaitingPieces {
+                Button("Cancel") { board.cancelGame() }
+            }
 
             if board.gameStatus == .inProgress,
                 let color = board.resignColor
@@ -47,6 +57,13 @@ struct ActiveGameView: View {
         }
         .padding()
         .navigationTitle("Game")
+    }
+
+    private var turnText: String {
+        guard let fen = board.currentPosition else { return "" }
+        let components = fen.split(separator: " ")
+        guard components.count >= 2 else { return "" }
+        return components[1] == "w" ? "White to move" : "Black to move"
     }
 
     private var statusText: String {
@@ -97,7 +114,9 @@ struct ActiveGameView: View {
         NavigationStack { ActiveGameView() }
             .environment(
                 BoardConnection(
-                    gameStatus: .inProgress
+                    gameStatus: .inProgress,
+                    currentPosition:
+                        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
                 )
             )
     }
