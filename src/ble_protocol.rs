@@ -123,6 +123,7 @@ pub enum BleCommand {
     SetWhitePlayer(PlayerConfig),
     SetBlackPlayer(PlayerConfig),
     StartGame,
+    CancelGame,
     Resign { color: Color },
     ConfigureWifi(WifiConfig),
     SetLichessToken(String),
