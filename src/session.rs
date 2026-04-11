@@ -163,9 +163,10 @@ impl GameSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::player::{EmbeddedEngine, HumanPlayer};
+    use crate::player::{HumanPlayer, RemotePlayer};
     use crate::testutil::ScriptedSensor;
     use shakmaty::{Color, Position, Square};
+    use std::sync::mpsc;
 
     fn run_script(sensor: &mut ScriptedSensor, session: &mut GameSession) -> TickResult {
         let mut last = None;
@@ -187,24 +188,26 @@ mod tests {
         (sensor, session)
     }
 
-    fn human_vs_engine() -> (ScriptedSensor, GameSession) {
+    fn human_vs_remote() -> (ScriptedSensor, GameSession, mpsc::Sender<Move>) {
         let sensor = ScriptedSensor::new();
         let initial = sensor.read_positions();
+        let (tx, rx) = mpsc::channel();
         let session = GameSession::new(
             Box::new(HumanPlayer::new(initial)),
-            Box::new(EmbeddedEngine::new(42)),
+            Box::new(RemotePlayer::new(rx)),
         );
-        (sensor, session)
+        (sensor, session, tx)
     }
 
-    fn engine_vs_human() -> (ScriptedSensor, GameSession) {
+    fn remote_vs_human() -> (ScriptedSensor, GameSession, mpsc::Sender<Move>) {
         let sensor = ScriptedSensor::new();
         let initial = sensor.read_positions();
+        let (tx, rx) = mpsc::channel();
         let session = GameSession::new(
-            Box::new(EmbeddedEngine::new(42)),
+            Box::new(RemotePlayer::new(rx)),
             Box::new(HumanPlayer::new(initial)),
         );
-        (sensor, session)
+        (sensor, session, tx)
     }
 
     /// Test player that delays returning a move for N ticks.
@@ -267,16 +270,19 @@ mod tests {
     }
 
     #[test]
-    fn human_vs_engine_produces_reply() {
-        let (mut sensor, mut session) = human_vs_engine();
+    fn human_vs_remote_receives_move() {
+        let (mut sensor, mut session, tx) = human_vs_remote();
 
         sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
         assert!(result.last_move.is_some());
-        // Human moved — it's now black's (engine's) turn
         assert_eq!(session.position().turn(), Color::Black);
 
-        // Next tick: engine replies
+        // Push a move for the remote player (any legal black move)
+        let legal_moves = session.position().legal_moves();
+        let remote_move = legal_moves.into_iter().next().unwrap();
+        tx.send(remote_move).unwrap();
+
         let result = session.tick(sensor.read_positions());
         assert!(result.last_move.is_some());
         assert_eq!(session.position().turn(), Color::White);
@@ -359,14 +365,22 @@ mod tests {
     }
 
     #[test]
-    fn recovery_feedback_after_engine_move() {
-        let (mut sensor, mut session) = human_vs_engine();
+    fn recovery_feedback_after_remote_move() {
+        let (mut sensor, mut session, tx) = human_vs_remote();
 
         sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
         assert!(result.last_move.is_some());
 
-        // Physical board hasn't been updated for engine's move
+        // Push a move for the remote player
+        let legal_moves = session.position().legal_moves();
+        let remote_move = legal_moves.into_iter().next().unwrap();
+        tx.send(remote_move).unwrap();
+
+        // Remote player moves; physical board hasn't been updated
+        let _ = session.tick(sensor.read_positions());
+
+        // Physical board is stale
         let result = session.tick(sensor.read_positions());
         assert!(!result.feedback.is_empty());
     }
@@ -391,10 +405,11 @@ mod tests {
             white: board.by_color(Color::White),
             black: board.by_color(Color::Black),
         };
+        let (_tx, rx) = mpsc::channel();
         let session = GameSession::from_position(
             position,
             Box::new(HumanPlayer::new(sensors)),
-            Box::new(EmbeddedEngine::new(42)),
+            Box::new(RemotePlayer::new(rx)),
         );
 
         assert_eq!(session.position().turn(), Color::Black);
@@ -443,19 +458,24 @@ mod tests {
     fn no_capture_guidance_during_opponent_move_recovery() {
         use crate::feedback::SquareFeedback;
 
-        let (mut sensor, mut session) = human_vs_engine();
+        let (mut sensor, mut session, tx) = human_vs_remote();
 
         // Human plays e2→e4
         sensor.push_script("e2 We4.").unwrap();
         let result = run_script(&mut sensor, &mut session);
         assert!(result.last_move.is_some(), "human move should be detected");
 
-        // Engine replies immediately on next tick; physical board is still post-human-move
+        // Push a move for the remote player
+        let legal_moves = session.position().legal_moves();
+        let remote_move = legal_moves.into_iter().next().unwrap();
+        tx.send(remote_move).unwrap();
+
+        // Remote replies on next tick; physical board is still post-human-move
         let result = session.tick(sensor.read_positions());
-        assert!(result.last_move.is_some(), "engine should reply");
+        assert!(result.last_move.is_some(), "remote should reply");
         // It is now white's (human's) turn again
 
-        // Physical board hasn't been updated for engine's move — should show recovery guidance
+        // Physical board hasn't been updated for remote's move — should show recovery guidance
         let result = session.tick(sensor.read_positions());
         assert!(
             !result.feedback.is_empty(),
@@ -535,26 +555,31 @@ mod tests {
             HumanPlayer::new(sensors).is_interactive(),
             "HumanPlayer should be interactive"
         );
+        let (_tx, rx) = mpsc::channel();
         assert!(
-            !EmbeddedEngine::new(42).is_interactive(),
-            "EmbeddedEngine should not be interactive"
+            !RemotePlayer::new(rx).is_interactive(),
+            "RemotePlayer should not be interactive"
         );
     }
 
     #[test]
-    fn engine_as_white_moves_on_first_tick() {
-        let (sensor, mut session) = engine_vs_human();
+    fn remote_as_white_moves_on_first_tick() {
+        let (sensor, mut session, tx) = remote_vs_human();
 
-        // Engine is white — should produce a move on the very first tick.
+        // Push a move for the remote player before the first tick
+        let legal_moves = session.position().legal_moves();
+        let remote_move = legal_moves.into_iter().next().unwrap();
+        tx.send(remote_move).unwrap();
+
         let result = session.tick(sensor.read_positions());
         assert!(
             result.last_move.is_some(),
-            "engine playing white should move on first tick"
+            "remote playing white should move on first tick when move is available"
         );
         assert_eq!(
             session.position().turn(),
             Color::Black,
-            "after engine's first move, it should be black's turn"
+            "after remote's first move, it should be black's turn"
         );
     }
 
@@ -621,8 +646,8 @@ mod tests {
 
     #[test]
     fn resign_rejected_for_non_interactive_player() {
-        let (_sensor, mut session) = human_vs_engine();
-        // Black is EmbeddedEngine (non-interactive) — resign should be rejected
+        let (_sensor, mut session, _tx) = human_vs_remote();
+        // Black is RemotePlayer (non-interactive) — resign should be rejected
         assert!(
             !session.resign(Color::Black),
             "resign should be rejected for non-interactive player"
@@ -661,10 +686,11 @@ mod tests {
             white: board.by_color(Color::White),
             black: board.by_color(Color::Black),
         };
+        let (_tx, rx) = mpsc::channel();
         let session = GameSession::from_position(
             position,
             Box::new(HumanPlayer::new(sensors)),
-            Box::new(EmbeddedEngine::new(42)),
+            Box::new(RemotePlayer::new(rx)),
         );
 
         assert!(
@@ -707,10 +733,11 @@ mod tests {
             white: board.by_color(Color::White),
             black: board.by_color(Color::Black),
         };
+        let (_tx, rx) = mpsc::channel();
         let session = GameSession::from_position(
             position,
             Box::new(HumanPlayer::new(sensors)),
-            Box::new(EmbeddedEngine::new(42)),
+            Box::new(RemotePlayer::new(rx)),
         );
 
         assert!(
