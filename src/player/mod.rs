@@ -1,8 +1,10 @@
 mod embedded;
 mod human;
+mod remote;
 
 pub use embedded::EmbeddedEngine;
 pub use human::HumanPlayer;
+pub use remote::RemotePlayer;
 
 use shakmaty::{Bitboard, ByColor, Chess, Color, Move};
 
