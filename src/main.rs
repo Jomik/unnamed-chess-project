@@ -21,7 +21,7 @@ fn main() {
         BleCommand, CommandResult, CommandSource, GameState, GameStatus, PlayerConfig, UNSET_BYTE,
     };
     use unnamed_chess_project::esp32::config::{LedPalette, SensorCalibration, SensorConfig};
-    use unnamed_chess_project::esp32::{start_ble, Esp32LedDisplay, Esp32PieceSensor};
+    use unnamed_chess_project::esp32::{Esp32LedDisplay, Esp32PieceSensor, start_ble};
     use unnamed_chess_project::feedback::BoardFeedback;
     use unnamed_chess_project::setup::setup_feedback;
     use unnamed_chess_project::{BoardDisplay, PieceSensor};
