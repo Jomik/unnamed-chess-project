@@ -129,4 +129,45 @@ final class BoardConnectionTests: XCTestCase {
         )
         XCTAssertNil(board.resignColor)
     }
+
+    func testCancelGameClearsLastCommandResult() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            lastCommandResult: CommandResult(
+                ok: true,
+                source: .startGame,
+                error: nil
+            )
+        )
+        board.cancelGame()
+        XCTAssertNil(board.lastCommandResult)
+    }
+
+    func testSubmitMoveClearsLastCommandResult() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            lastCommandResult: CommandResult(
+                ok: false,
+                source: .startGame,
+                error: nil
+            )
+        )
+        board.submitMove("e2e4")
+        XCTAssertNil(board.lastCommandResult)
+    }
+
+    func testSubmitMoveTooLongIsIgnored() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            lastCommandResult: CommandResult(
+                ok: true,
+                source: .startGame,
+                error: nil
+            )
+        )
+        // A string longer than 255 bytes must not clear lastCommandResult
+        let longMove = String(repeating: "a", count: 256)
+        board.submitMove(longMove)
+        XCTAssertNotNil(board.lastCommandResult)
+    }
 }
