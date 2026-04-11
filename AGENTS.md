@@ -47,6 +47,8 @@ just check-all          # Run check + clippy-esp
 
 CI treats clippy warnings as errors (`-D warnings`). **Never run `cargo +esp` directly** — always use `just` recipes, which load `IDF_PATH` from `.env` via `set dotenv-load`. Running `cargo +esp` without `IDF_PATH` corrupts the ESP-IDF setup.
 
+`cargo fmt` works on **all** source files regardless of `#[cfg]` gating. Always run it even for ESP-only files. Only `clippy` and `test` require the correct target.
+
 Swift CI (`.github/workflows/swift_ci.yml`) runs lint and build+test checks on every PR using the `macos-26` runner.
 
 ## Conditional Compilation
@@ -94,9 +96,9 @@ PieceSensor::read_positions() → ByColor<Bitboard>
 - **feedback.rs** — `compute_feedback` and `compute_state_feedback`: feedback from position + sensors. Recovery guidance is integrated as a fallback path.
 - **board_api.rs** — Transport-agnostic domain types from `docs/board-api.md`: `GameStatus`, `PlayerType`, `BoardApiError`. `GameSession` returns these directly; BLE encoding lives in `ble_protocol`.
 - **session.rs** — `GameSession`: owns chess position + two `Box<dyn Player>`, produces `TickResult` per sensor frame; also exposes `resign()`, `is_game_over()`, and `game_state()` for game lifecycle management
-- **ble_protocol.rs** — `BleCommand`, `PlayerConfig`, `GameState`, `CommandResult`, `WifiAuthMode`, `WifiConfig`, `WifiState`, `WifiStatus`, `LichessState`, `LichessStatus`, UUID constants, binary encoding/decoding. Platform-independent, host-testable.
+- **ble_protocol.rs** — `BleCommand`, `CommandResult`, `CommandSource`, `ErrorCode`, UUID constants, binary encoding/decoding for `board_api` types (`PlayerType`, `GameStatus`, move encoding). Platform-independent, host-testable.
 - **esp32/sensor.rs** — `Esp32PieceSensor`: ADC + mux scanning, `RawScan` for raw millivolt readings, `read_raw()` primitive
-- **esp32/ble.rs** — `start_ble()` initializes NimBLE and returns `BleCommands` (command receiver) + `BleNotifier` (characteristic updater). Three fully functional GATT services (WiFi, Lichess, Game), typed characteristic handles.
+- **esp32/ble.rs** — `start_ble()` initializes NimBLE and returns `BleCommands` (command receiver) + `BleNotifier` (characteristic updater). Single Game GATT service with typed characteristic handles for game status, player types, moves, and position.
 - **esp32/config.rs** — `SensorCalibration` NVS load/save (cal partition), `CalibrationError`, `SensorConfig`, `LedPalette`, `Rgb8` display/sensor configuration types
 - **setup.rs** — pre-game feedback showing which starting-position squares still need pieces
 - **testutil/script.rs** — `ScriptedSensor` with BoardScript mini-language for tests

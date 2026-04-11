@@ -2,15 +2,12 @@ use std::sync::mpsc;
 
 use esp32_nimble::utilities::mutex::Mutex;
 use esp32_nimble::{
-    BLEAdvertisementData, BLECharacteristic, BLEDevice, BLEServer, NimbleProperties,
-    utilities::BleUuid, uuid128,
+    BLEAdvertisementData, BLECharacteristic, BLEDevice, BLEServer, NimbleProperties, uuid128,
 };
 use shakmaty::Color;
 
-use crate::ble_protocol::{
-    BleCommand, CommandResult, CommandSource, GameState, LichessStatus, PlayerConfig, UNSET_BYTE,
-    WifiConfig, WifiStatus, uuids,
-};
+use crate::ble_protocol::{self, BleCommand, CommandResult, CommandSource, UNSET_BYTE, uuids};
+use crate::board_api;
 
 use alloc::sync::Arc;
 extern crate alloc;
@@ -25,29 +22,15 @@ pub enum BleError {
 
 const ATT_ERR_REQUEST_NOT_SUPPORTED: u8 = 0x06;
 
-struct GameStateHandle(ChrHandle);
+// ---------------------------------------------------------------------------
+// Handle wrappers
+// ---------------------------------------------------------------------------
 
-impl GameStateHandle {
-    fn notify(&self, state: &GameState) {
-        let encoded = state.encode();
-        self.0.lock().set_value(&encoded).notify();
-    }
-}
+struct GameStatusHandle(ChrHandle);
 
-struct WifiStatusHandle(ChrHandle);
-
-impl WifiStatusHandle {
-    fn notify(&self, status: &WifiStatus) {
-        let encoded = status.encode();
-        self.0.lock().set_value(&encoded).notify();
-    }
-}
-
-struct LichessStatusHandle(ChrHandle);
-
-impl LichessStatusHandle {
-    fn notify(&self, status: &LichessStatus) {
-        let encoded = status.encode();
+impl GameStatusHandle {
+    fn notify(&self, status: &board_api::GameStatus) {
+        let encoded = ble_protocol::encode_game_status(status);
         self.0.lock().set_value(&encoded).notify();
     }
 }
@@ -69,20 +52,70 @@ impl CommandResultHandle {
     }
 }
 
-struct PlayerConfigHandle(ChrHandle);
+struct PlayerTypeHandle(ChrHandle);
 
-impl PlayerConfigHandle {
-    fn update(&self, bytes: &[u8]) {
-        self.0.lock().set_value(bytes);
+impl PlayerTypeHandle {
+    fn update(&self, pt: board_api::PlayerType) {
+        let byte = ble_protocol::encode_player_type(pt);
+        self.0.lock().set_value(&[byte]).notify();
+    }
+
+    fn reset(&self) {
+        self.0.lock().set_value(&[UNSET_BYTE]).notify();
     }
 }
 
-struct GameHandles {
-    white_player: PlayerConfigHandle,
-    black_player: PlayerConfigHandle,
-    game_state: GameStateHandle,
-    command_result: CommandResultHandle,
+struct PositionHandle(ChrHandle);
+
+impl PositionHandle {
+    fn update(&self, fen: &str) {
+        self.0.lock().set_value(fen.as_bytes()).notify();
+    }
+
+    fn reset(&self) {
+        self.0.lock().set_value(&[]).notify();
+    }
 }
+
+struct LastMoveHandle(ChrHandle);
+
+impl LastMoveHandle {
+    fn update(&self, color: Color, uci: &str) {
+        let encoded = ble_protocol::encode_move(color, uci);
+        self.0.lock().set_value(&encoded).notify();
+    }
+
+    fn reset(&self) {
+        self.0.lock().set_value(&[]).notify();
+    }
+}
+
+struct MovePlayedHandle(ChrHandle);
+
+impl MovePlayedHandle {
+    fn notify(&self, color: Color, uci: &str) {
+        let encoded = ble_protocol::encode_move(color, uci);
+        self.0.lock().set_value(&encoded).notify();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GameHandles — internal bundle returned from register_game_service
+// ---------------------------------------------------------------------------
+
+struct GameHandles {
+    white_player: PlayerTypeHandle,
+    black_player: PlayerTypeHandle,
+    game_status: GameStatusHandle,
+    command_result: CommandResultHandle,
+    position: PositionHandle,
+    last_move: LastMoveHandle,
+    move_played: MovePlayedHandle,
+}
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 
 pub struct BleCommands {
     rx: mpsc::Receiver<BleCommand>,
@@ -101,12 +134,13 @@ impl BleCommands {
 }
 
 pub struct BleNotifier {
-    game_state: GameStateHandle,
+    game_status: GameStatusHandle,
     command_result: CommandResultHandle,
-    white_player: PlayerConfigHandle,
-    black_player: PlayerConfigHandle,
-    wifi_status: WifiStatusHandle,
-    lichess_status: LichessStatusHandle,
+    white_player: PlayerTypeHandle,
+    black_player: PlayerTypeHandle,
+    position: PositionHandle,
+    last_move: LastMoveHandle,
+    move_played: MovePlayedHandle,
 }
 
 impl std::fmt::Debug for BleNotifier {
@@ -116,29 +150,59 @@ impl std::fmt::Debug for BleNotifier {
 }
 
 impl BleNotifier {
-    pub fn notify_game_state(&self, state: &GameState) {
-        self.game_state.notify(state);
+    /// Update the game status characteristic and notify subscribers.
+    pub fn notify_game_status(&self, status: &board_api::GameStatus) {
+        self.game_status.notify(status);
     }
 
+    /// Notify the command result characteristic.
     pub fn notify_command_result(&self, result: &CommandResult) {
         self.command_result.notify(result);
     }
 
-    pub fn update_player_config(&self, color: Color, bytes: &[u8]) {
+    /// Update a player type characteristic (read+notify) after a game starts.
+    pub fn update_player_type(&self, color: Color, pt: board_api::PlayerType) {
         match color {
-            Color::White => self.white_player.update(bytes),
-            Color::Black => self.black_player.update(bytes),
+            Color::White => self.white_player.update(pt),
+            Color::Black => self.black_player.update(pt),
         }
     }
 
-    pub fn notify_wifi_status(&self, status: &WifiStatus) {
-        self.wifi_status.notify(status);
+    /// Notify the MovePlayed characteristic (notify-only) when a move is played.
+    pub fn notify_move_played(&self, color: Color, uci: &str) {
+        self.move_played.notify(color, uci);
     }
 
-    pub fn notify_lichess_status(&self, status: &LichessStatus) {
-        self.lichess_status.notify(status);
+    /// Update the Position (FEN) characteristic and notify subscribers.
+    pub fn update_position(&self, fen: &str) {
+        self.position.update(fen);
+    }
+
+    /// Update the LastMove characteristic and notify subscribers.
+    pub fn update_last_move(&self, color: Color, uci: &str) {
+        self.last_move.update(color, uci);
+    }
+
+    /// Reset both player type characteristics to UNSET_BYTE (called after game ends).
+    pub fn reset_player_types(&self) {
+        self.white_player.reset();
+        self.black_player.reset();
+    }
+
+    /// Clear the Position characteristic (called when game ends).
+    pub fn reset_position(&self) {
+        self.position.reset();
+    }
+
+    /// Clear the LastMove characteristic (called when game ends).
+    pub fn reset_last_move(&self) {
+        self.last_move.reset();
     }
 }
+
+// ---------------------------------------------------------------------------
+// start_ble
+// ---------------------------------------------------------------------------
 
 /// Returns [`BleCommands`] (inbound) and [`BleNotifier`] (outbound).
 pub fn start_ble() -> Result<(BleCommands, BleNotifier), BleError> {
@@ -148,15 +212,14 @@ pub fn start_ble() -> Result<(BleCommands, BleNotifier), BleError> {
 
     let server = device.get_server();
 
-    let wifi_status = register_wifi_service(server, &tx);
-
-    let lichess_status = register_lichess_service(server, &tx);
-
     let GameHandles {
         white_player,
         black_player,
-        game_state,
+        game_status,
         command_result,
+        position,
+        last_move,
+        move_played,
     } = register_game_service(server, &tx);
 
     {
@@ -184,151 +247,60 @@ pub fn start_ble() -> Result<(BleCommands, BleNotifier), BleError> {
     Ok((
         BleCommands { rx },
         BleNotifier {
-            game_state,
+            game_status,
             command_result,
             white_player,
             black_player,
-            wifi_status,
-            lichess_status,
+            position,
+            last_move,
+            move_played,
         },
     ))
 }
 
-fn register_wifi_service(
-    server: &mut BLEServer,
-    tx: &mpsc::SyncSender<BleCommand>,
-) -> WifiStatusHandle {
-    let svc = server.create_service(uuid128!(uuids::WIFI_SERVICE));
-    let mut svc = svc.lock();
-
-    let config_chr =
-        svc.create_characteristic(uuid128!(uuids::WIFI_CONFIG), NimbleProperties::WRITE);
-    {
-        let tx = tx.clone();
-        config_chr
-            .lock()
-            .on_write(move |args| match WifiConfig::from_bytes(args.recv_data()) {
-                Ok(config) => {
-                    if let Err(e) = tx.try_send(BleCommand::ConfigureWifi(config)) {
-                        log::warn!("BLE command channel full (wifi_config): {e}");
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Invalid WiFi Config write: {e}");
-                    args.reject_with_error_code(ATT_ERR_REQUEST_NOT_SUPPORTED);
-                }
-            });
-    }
-
-    let status_chr = svc.create_characteristic(
-        uuid128!(uuids::WIFI_STATUS),
-        NimbleProperties::READ | NimbleProperties::NOTIFY,
-    );
-    status_chr
-        .lock()
-        .set_value(&WifiStatus::disconnected().encode());
-
-    WifiStatusHandle(status_chr)
-}
-
-fn register_lichess_service(
-    server: &mut BLEServer,
-    tx: &mpsc::SyncSender<BleCommand>,
-) -> LichessStatusHandle {
-    let svc = server.create_service(uuid128!(uuids::LICHESS_SERVICE));
-    let mut svc = svc.lock();
-
-    let token_chr =
-        svc.create_characteristic(uuid128!(uuids::LICHESS_TOKEN), NimbleProperties::WRITE);
-    {
-        let tx = tx.clone();
-        token_chr.lock().on_write(move |args| {
-            match BleCommand::parse_lichess_token(args.recv_data()) {
-                Ok(cmd) => {
-                    if let Err(e) = tx.try_send(cmd) {
-                        log::warn!("BLE command channel full (lichess_token): {e}");
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Invalid Lichess Token write: {e}");
-                    args.reject_with_error_code(ATT_ERR_REQUEST_NOT_SUPPORTED);
-                }
-            }
-        });
-    }
-
-    let status_chr = svc.create_characteristic(
-        uuid128!(uuids::LICHESS_STATUS),
-        NimbleProperties::READ | NimbleProperties::NOTIFY,
-    );
-    status_chr.lock().set_value(&LichessStatus::idle().encode());
-
-    LichessStatusHandle(status_chr)
-}
-
-fn register_player_characteristic(
-    svc: &mut impl std::ops::DerefMut<Target = esp32_nimble::BLEService>,
-    uuid: BleUuid,
-    tx: &mpsc::SyncSender<BleCommand>,
-    make_command: fn(PlayerConfig) -> BleCommand,
-    label: &str,
-) -> PlayerConfigHandle {
-    let player_chr =
-        svc.create_characteristic(uuid, NimbleProperties::READ | NimbleProperties::WRITE);
-    {
-        let tx = tx.clone();
-        let label = label.to_string();
-        player_chr
-            .lock()
-            .set_value(&[UNSET_BYTE])
-            .on_write(
-                move |args| match PlayerConfig::from_bytes(args.recv_data()) {
-                    Ok(config) => {
-                        if let Err(e) = tx.try_send(make_command(config)) {
-                            log::warn!("BLE command channel full ({}): {e}", label);
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("Invalid {} Player write: {e}", label);
-                        args.reject_with_error_code(ATT_ERR_REQUEST_NOT_SUPPORTED);
-                    }
-                },
-            );
-    }
-    PlayerConfigHandle(player_chr)
-}
+// ---------------------------------------------------------------------------
+// register_game_service
+// ---------------------------------------------------------------------------
 
 fn register_game_service(server: &mut BLEServer, tx: &mpsc::SyncSender<BleCommand>) -> GameHandles {
     let game_svc = server.create_service(uuid128!(uuids::GAME_SERVICE));
     let mut svc = game_svc.lock();
 
-    let white_player = register_player_characteristic(
-        &mut svc,
+    // White Player — read+notify; updated by firmware after StartGame is processed.
+    let white_player_chr = svc.create_characteristic(
         uuid128!(uuids::WHITE_PLAYER),
-        tx,
-        BleCommand::SetWhitePlayer,
-        "white",
+        NimbleProperties::READ | NimbleProperties::NOTIFY,
     );
+    white_player_chr.lock().set_value(&[UNSET_BYTE]);
 
-    let black_player = register_player_characteristic(
-        &mut svc,
+    // Black Player — read+notify; updated by firmware after StartGame is processed.
+    let black_player_chr = svc.create_characteristic(
         uuid128!(uuids::BLACK_PLAYER),
-        tx,
-        BleCommand::SetBlackPlayer,
-        "black",
+        NimbleProperties::READ | NimbleProperties::NOTIFY,
     );
+    black_player_chr.lock().set_value(&[UNSET_BYTE]);
 
+    // Start Game — write; carries [white_type: u8, black_type: u8].
     let start_game_chr =
         svc.create_characteristic(uuid128!(uuids::START_GAME), NimbleProperties::WRITE);
     {
         let tx = tx.clone();
-        start_game_chr.lock().on_write(move |_args| {
-            if let Err(e) = tx.try_send(BleCommand::StartGame) {
-                log::warn!("BLE command channel full (start): {e}");
+        start_game_chr.lock().on_write(move |args| {
+            match BleCommand::parse_start_game(args.recv_data()) {
+                Ok(cmd) => {
+                    if let Err(e) = tx.try_send(cmd) {
+                        log::warn!("BLE command channel full (start_game): {e}");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Invalid Start Game write: {e}");
+                    args.reject_with_error_code(ATT_ERR_REQUEST_NOT_SUPPORTED);
+                }
             }
         });
     }
 
+    // Match Control — write; carries resign / cancel actions.
     let match_control_chr =
         svc.create_characteristic(uuid128!(uuids::MATCH_CONTROL), NimbleProperties::WRITE);
     {
@@ -348,12 +320,38 @@ fn register_game_service(server: &mut BLEServer, tx: &mpsc::SyncSender<BleComman
         });
     }
 
-    let game_state_chr = svc.create_characteristic(
-        uuid128!(uuids::GAME_STATE),
+    // Submit Move — write; carries [len: u8, uci_bytes...].
+    let submit_move_chr =
+        svc.create_characteristic(uuid128!(uuids::SUBMIT_MOVE), NimbleProperties::WRITE);
+    {
+        let tx = tx.clone();
+        submit_move_chr.lock().on_write(move |args| {
+            match BleCommand::parse_submit_move(args.recv_data()) {
+                Ok(cmd) => {
+                    if let Err(e) = tx.try_send(cmd) {
+                        log::warn!("BLE command channel full (submit_move): {e}");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Invalid Submit Move write: {e}");
+                    args.reject_with_error_code(ATT_ERR_REQUEST_NOT_SUPPORTED);
+                }
+            }
+        });
+    }
+
+    // Game Status — read+notify; encoded GameStatus bytes.
+    let game_status_chr = svc.create_characteristic(
+        uuid128!(uuids::GAME_STATUS),
         NimbleProperties::READ | NimbleProperties::NOTIFY,
     );
-    game_state_chr.lock().set_value(&GameState::idle().encode());
+    game_status_chr
+        .lock()
+        .set_value(&ble_protocol::encode_game_status(
+            &board_api::GameStatus::Idle,
+        ));
 
+    // Command Result — read+notify; encoded CommandResult bytes.
     let command_result_chr = svc.create_characteristic(
         uuid128!(uuids::COMMAND_RESULT),
         NimbleProperties::READ | NimbleProperties::NOTIFY,
@@ -362,10 +360,31 @@ fn register_game_service(server: &mut BLEServer, tx: &mpsc::SyncSender<BleComman
         .lock()
         .set_value(&CommandResult::success(CommandSource::StartGame).encode());
 
+    // Position — read+notify; FEN string bytes (empty until game starts).
+    let position_chr = svc.create_characteristic(
+        uuid128!(uuids::POSITION),
+        NimbleProperties::READ | NimbleProperties::NOTIFY,
+    );
+    position_chr.lock().set_value(&[]);
+
+    // Last Move — read+notify; encoded move bytes (empty until first move).
+    let last_move_chr = svc.create_characteristic(
+        uuid128!(uuids::LAST_MOVE),
+        NimbleProperties::READ | NimbleProperties::NOTIFY,
+    );
+    last_move_chr.lock().set_value(&[]);
+
+    // Move Played — notify-only; fired each time a move is committed.
+    let move_played_chr =
+        svc.create_characteristic(uuid128!(uuids::MOVE_PLAYED), NimbleProperties::NOTIFY);
+
     GameHandles {
-        white_player,
-        black_player,
-        game_state: GameStateHandle(game_state_chr),
+        white_player: PlayerTypeHandle(white_player_chr),
+        black_player: PlayerTypeHandle(black_player_chr),
+        game_status: GameStatusHandle(game_status_chr),
         command_result: CommandResultHandle(command_result_chr),
+        position: PositionHandle(position_chr),
+        last_move: LastMoveHandle(last_move_chr),
+        move_played: MovePlayedHandle(move_played_chr),
     }
 }
