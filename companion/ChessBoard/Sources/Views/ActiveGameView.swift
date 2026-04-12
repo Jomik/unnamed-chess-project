@@ -8,11 +8,11 @@ struct ActiveGameView: View {
         VStack(spacing: 32) {
             Spacer()
 
-            Image(systemName: statusIcon)
+            Image(systemName: board.gameStatus.iconName)
                 .font(.system(size: 48))
-                .foregroundStyle(statusColor)
+                .foregroundStyle(board.gameStatus.displayColor)
 
-            Text(statusText)
+            Text(board.gameStatus.displayText)
                 .font(.largeTitle.bold())
 
             if board.gameStatus == .inProgress {
@@ -75,39 +75,6 @@ struct ActiveGameView: View {
         return components[1] == "w" ? "White to move" : "Black to move"
     }
 
-    private var statusText: String {
-        switch board.gameStatus {
-        case .idle: return "No Game"
-        case .awaitingPieces: return "Set Up Starting Position"
-        case .inProgress: return "In Progress"
-        case .checkmate(let loser):
-            return "Checkmate – \(loser == .white ? "White" : "Black") loses"
-        case .stalemate: return "Stalemate"
-        case .resigned(let color):
-            return "\(color == .white ? "White" : "Black") Resigned"
-        }
-    }
-
-    private var statusIcon: String {
-        switch board.gameStatus {
-        case .idle: return "square.dashed"
-        case .awaitingPieces: return "checkerboard.rectangle"
-        case .inProgress: return "play.fill"
-        case .checkmate: return "crown.fill"
-        case .stalemate: return "equal.circle.fill"
-        case .resigned: return "flag.fill"
-        }
-    }
-
-    private var statusColor: Color {
-        switch board.gameStatus {
-        case .idle: return .secondary
-        case .awaitingPieces: return .blue
-        case .inProgress: return .green
-        case .checkmate: return .orange
-        default: return .secondary
-        }
-    }
 }
 
 #if DEBUG
