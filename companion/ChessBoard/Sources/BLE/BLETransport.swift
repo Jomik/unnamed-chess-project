@@ -7,7 +7,7 @@ final class BLETransport: NSObject, BoardTransport,
 
     private var centralManager: CBCentralManager!
     private var peripheral: CBPeripheral?
-    private var characteristics: [CBUUID: CBCharacteristic] = [:]
+    private var characteristics = [CBUUID: CBCharacteristic]()
     private var awaitingInitialState = false
 
     override init() {
