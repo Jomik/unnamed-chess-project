@@ -103,7 +103,7 @@ Without calibration, the firmware falls back to conservative defaults that may n
 
 ### Remote Player Architecture
 
-The board uses `RemotePlayer` to receive moves from an external source (e.g., the companion app or your own controller). The companion app handles configuring players, starting games, and can act as a bridge for remote opponents. Lichess integration is planned but not yet implemented.
+The board uses `RemotePlayer` to receive moves from an external source (e.g., the companion app or your own controller). The companion app handles configuring players, starting games, and acts as a bridge for remote opponents. It includes a Lichess integration that challenges the Lichess AI, streams game events via NDJSON, and forwards moves bidirectionally between the physical board and Lichess.
 
 ## Development
 
