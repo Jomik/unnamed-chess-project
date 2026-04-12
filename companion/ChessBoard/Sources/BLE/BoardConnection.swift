@@ -75,9 +75,9 @@ class BoardConnection {
     }
 
     #if DEBUG
-        /// Creates a BoardConnection with pre-set state and no BLE transport.
-        /// Commands are no-ops (transport is nil). For use in #Preview macros.
-        init(
+        /// Creates a BoardConnection backed by a MockTransport with pre-set state.
+        /// For use in #Preview macros and tests.
+        convenience init(
             connectionState: ConnectionState = .ready,
             gameStatus: GameStatus = .idle,
             currentPosition: String? = nil,
@@ -85,7 +85,7 @@ class BoardConnection {
             whitePlayerType: PlayerType? = .human,
             blackPlayerType: PlayerType? = .remote
         ) {
-            self.transport = nil
+            self.init(transport: MockTransport())
             self.connectionState = connectionState
             self.gameStatus = gameStatus
             self.currentPosition = currentPosition
