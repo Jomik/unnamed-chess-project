@@ -21,6 +21,15 @@ struct ActiveGameView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if let lichessError = board.lichessError
+                ?? board.lichessService?.error
+            {
+                Label(lichessError, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.red)
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+            }
+
             Spacer()
 
             if board.gameStatus == .awaitingPieces {

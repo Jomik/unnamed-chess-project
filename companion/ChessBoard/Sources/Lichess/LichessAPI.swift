@@ -9,15 +9,29 @@ enum LichessGameEvent {
 
 // MARK: - Errors
 
-enum LichessAPIError: Error {
+enum LichessAPIError: LocalizedError {
     case badStatus(Int)
     case invalidResponse
     case missingGameId
+
+    var errorDescription: String? {
+        switch self {
+        case .badStatus(401):
+            return "Invalid Lichess API token"
+        case .badStatus(let code):
+            return "Lichess API error (status \(code))"
+        case .invalidResponse:
+            return "Invalid response from Lichess"
+        case .missingGameId:
+            return "Lichess did not return a game ID"
+        }
+    }
 }
 
 // MARK: - Protocol for testability
 
 protocol LichessAPIProtocol: Sendable {
+    func validateToken() async throws
     func challengeAI(level: Int, color: String) async throws -> String
     func streamGame(id: String) -> AsyncThrowingStream<LichessGameEvent, Error>
     func makeMove(gameId: String, uci: String) async throws
@@ -43,6 +57,23 @@ final class LichessAPI: LichessAPIProtocol, @unchecked Sendable {
         self.token = token
         self.baseURL = baseURL
         self.session = session
+    }
+
+    /// Validate the stored token by calling GET /api/account.
+    /// Throws `LichessAPIError.badStatus(401)` for an invalid token.
+    func validateToken() async throws {
+        var request = URLRequest(url: baseURL.appendingPathComponent("account"))
+        request.setValue(
+            "Bearer \(token)",
+            forHTTPHeaderField: "Authorization"
+        )
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw LichessAPIError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw LichessAPIError.badStatus(http.statusCode)
+        }
     }
 
     /// Challenge the Lichess AI. Returns the game ID.
@@ -114,30 +145,14 @@ final class LichessAPI: LichessAPIProtocol, @unchecked Sendable {
                         return
                     }
 
-                    var lineBuffer = ""
-                    for try await byte in bytes {
-                        let char = Character(UnicodeScalar(byte))
-                        if char == "\n" {
-                            let line = lineBuffer.trimmingCharacters(
-                                in: .whitespaces
-                            )
-                            lineBuffer = ""
-                            guard !line.isEmpty else { continue }
-                            if let event = Self.parseLine(line) {
-                                continuation.yield(event)
-                            }
-                        } else {
-                            lineBuffer.append(char)
+                    for try await line in bytes.lines {
+                        let trimmed = line.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        )
+                        guard !trimmed.isEmpty else { continue }
+                        if let event = Self.parseLine(trimmed) {
+                            continuation.yield(event)
                         }
-                    }
-                    // Flush any remaining data
-                    let remaining = lineBuffer.trimmingCharacters(
-                        in: .whitespaces
-                    )
-                    if !remaining.isEmpty,
-                        let event = Self.parseLine(remaining)
-                    {
-                        continuation.yield(event)
                     }
                     continuation.finish()
                 } catch {

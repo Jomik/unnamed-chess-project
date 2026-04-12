@@ -5,8 +5,21 @@ import Observation
 
 private let terminalStatuses: Set<String> = [
     "mate", "resign", "stalemate", "timeout", "draw", "outoftime", "cheat",
-    "noStart", "unknownFinish", "variantEnd",
+    "noStart", "unknownFinish", "variantEnd", "aborted",
 ]
+
+// MARK: - User-facing messages for terminal statuses
+
+private func terminalMessage(for status: String) -> String? {
+    switch status {
+    case "mate": return nil  // Board detects checkmate from position
+    case "resign": return "Opponent resigned"
+    case "timeout", "outoftime": return "Game ended: timeout"
+    case "aborted", "noStart": return "Game aborted"
+    case "draw", "stalemate": return "Game ended in a draw"
+    default: return "Game over"
+    }
+}
 
 // MARK: - LichessService
 
@@ -73,6 +86,7 @@ class LichessService {
         } catch {
             self.error = error.localizedDescription
             isActive = false
+            board.cancelGame()
         }
     }
 
@@ -85,8 +99,21 @@ class LichessService {
         // those echoes.
         guard color == humanColor else { return }
         guard let id = gameId, isActive else { return }
-        Task {
-            try? await api.makeMove(gameId: id, uci: uci)
+        Task { @MainActor in
+            // Re-check that the service is still active and the game ID hasn't changed
+            guard isActive, let currentGameId = gameId, currentGameId == id
+            else { return }
+            do {
+                try await api.makeMove(gameId: id, uci: uci)
+            } catch {
+                // Retry once before surfacing the error
+                do {
+                    try await api.makeMove(gameId: id, uci: uci)
+                } catch {
+                    self.error =
+                        "Move submission failed: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
@@ -106,13 +133,15 @@ class LichessService {
         streamTask?.cancel()
         streamTask = Task { [weak self] in
             guard let self else { return }
-            let stream = api.streamGame(id: gameId)
             do {
-                for try await event in stream {
-                    self.handleEvent(event)
-                }
+                try await self.runStream(gameId: gameId)
             } catch {
-                if !Task.isCancelled {
+                // First attempt failed — try once more if not cancelled
+                guard !Task.isCancelled else { return }
+                do {
+                    try await self.runStream(gameId: gameId)
+                } catch {
+                    guard !Task.isCancelled else { return }
                     self.error = error.localizedDescription
                     self.isActive = false
                 }
@@ -120,19 +149,43 @@ class LichessService {
         }
     }
 
+    /// Runs the game stream until completion or error.
+    private func runStream(gameId: String) async throws {
+        let stream = api.streamGame(id: gameId)
+        for try await event in stream {
+            handleEvent(event)
+        }
+        // Normal stream completion (server closed the connection without a
+        // terminal event) — mark service as inactive.
+        if isActive {
+            isActive = false
+        }
+    }
+
     private func handleEvent(_ event: LichessGameEvent) {
         switch event {
         case .gameFull(_, let initialMoves, _):
             let plies = movesCount(initialMoves)
-            lastMoveCount = plies
-            // If the AI moved first (human is black), submit that initial move
-            if plies > 0 {
-                submitLatestAIMove(from: initialMoves, previousCount: 0)
+            // If the AI moved first (human is black), submit that initial move.
+            // On stream reconnect, only submit if there are genuinely new moves
+            // beyond what we've already processed (use lastMoveCount as baseline).
+            if plies > lastMoveCount {
+                submitLatestAIMove(
+                    from: initialMoves,
+                    previousCount: lastMoveCount
+                )
             }
+            lastMoveCount = plies
 
         case .gameState(let moves, let status, _):
             if terminalStatuses.contains(status) {
-                board.cancelGame()
+                // For mate, the board detects checkmate from position itself.
+                // For all other terminal states, force the board out of the
+                // current game and surface a human-readable message.
+                if status != "mate" {
+                    board.cancelGame()
+                    error = terminalMessage(for: status)
+                }
                 streamTask?.cancel()
                 streamTask = nil
                 isActive = false

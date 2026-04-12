@@ -15,6 +15,11 @@ final class MockLichessAPI: LichessAPIProtocol, @unchecked Sendable {
     /// Controls events emitted by streamGame. Set before calling start().
     var streamEvents: [LichessGameEvent] = []
 
+    var validateTokenError: Error?
+    func validateToken() async throws {
+        if let error = validateTokenError { throw error }
+    }
+
     func challengeAI(level: Int, color: String) async throws -> String {
         switch challengeAIResult {
         case .success(let id): return id

@@ -1,3 +1,4 @@
+import Security
 import SwiftUI
 
 struct NewGameView: View {
@@ -11,10 +12,18 @@ struct NewGameView: View {
     @State private var hasLoaded = false
     @State private var isStarting = false
 
+    // Lichess configuration
+    @State private var lichessToken: String = ""
+    @State private var lichessLevel: Int = 3
+
     var body: some View {
         Form {
             playerSection("White", type: $whiteType)
             playerSection("Black", type: $blackType)
+
+            if isLichessGame {
+                lichessConfigSection
+            }
 
             if let error {
                 Section {
@@ -23,15 +32,12 @@ struct NewGameView: View {
                         systemImage: "exclamationmark.triangle"
                     )
                     .foregroundStyle(.red)
-                    Button("Retry") {
-                        startGame()
-                    }
                 }
             }
 
             Section {
                 Button {
-                    startGame()
+                    Task { await startGame() }
                 } label: {
                     HStack {
                         Text("Start Game")
@@ -76,6 +82,24 @@ struct NewGameView: View {
         }
     }
 
+    // MARK: - Derived helpers
+
+    /// True when at least one side is Remote (Lichess AI).
+    private var isLichessGame: Bool {
+        whiteType == .remote || blackType == .remote
+    }
+
+    /// The color that is NOT remote (nil when both are remote or neither).
+    private var humanColor: Turn? {
+        switch (whiteType, blackType) {
+        case (.human, .remote): return .white
+        case (.remote, .human): return .black
+        default: return nil
+        }
+    }
+
+    // MARK: - Sub-views
+
     private func playerSection(
         _ title: String,
         type: Binding<PlayerType>
@@ -83,19 +107,77 @@ struct NewGameView: View {
         Section(title) {
             Picker("Player", selection: type) {
                 Text("Human").tag(PlayerType.human)
-                Text("Remote").tag(PlayerType.remote)
+                Text("Lichess AI").tag(PlayerType.remote)
             }
             .pickerStyle(.segmented)
         }
     }
 
-    private func startGame() {
+    @ViewBuilder
+    private var lichessConfigSection: some View {
+        Section("Lichess AI") {
+            SecureField("API Token", text: $lichessToken)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            Picker("AI Level", selection: $lichessLevel) {
+                ForEach(1...8, id: \.self) { level in
+                    Text("Level \(level)").tag(level)
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func startGame() async {
         error = nil
+        board.lichessError = nil  // Clear any previous Lichess errors
         savePreferences()
         guard board.connectionState == .ready else {
             error = "Board disconnected"
             return
         }
+
+        // Set up Lichess bridge when one side is remote
+        if isLichessGame, let color = humanColor {
+            let trimmedToken = lichessToken.trimmingCharacters(in: .whitespaces)
+            guard !trimmedToken.isEmpty else {
+                error = "Lichess API token is required"
+                return
+            }
+
+            // Validate token before starting the board game
+            isStarting = true
+            let api = LichessAPI(token: trimmedToken)
+            do {
+                try await api.validateToken()
+            } catch {
+                isStarting = false
+                self.error = error.localizedDescription
+                return
+            }
+
+            let service = LichessService(
+                token: trimmedToken,
+                board: board,
+                humanColor: color
+            )
+            board.lichessService = service
+            board.pendingLichessLevel = lichessLevel
+            board.onMovePlayed = { [weak service] turn, uci in
+                service?.boardMovePlayed(color: turn, uci: uci)
+            }
+        } else if isLichessGame {
+            // Both sides are remote — not a supported configuration
+            error = "At least one side must be human for a Lichess game"
+            return
+        } else {
+            board.lichessService = nil
+            board.pendingLichessLevel = nil
+            board.onMovePlayed = nil
+        }
+
         isStarting = true
         board.configureAndStart(white: whiteType, black: blackType)
     }
@@ -114,12 +196,43 @@ struct NewGameView: View {
         {
             blackType = type
         }
+        // Load Lichess token from Keychain
+        if let token = KeychainStore.retrieve(forKey: "lichess_token") {
+            lichessToken = token
+        }
+        // Load Lichess level from UserDefaults
+        if let savedLevel = defaults.object(forKey: "lichess_level") as? Int {
+            lichessLevel = savedLevel
+        }
     }
 
     private func savePreferences() {
         let defaults = UserDefaults.standard
         defaults.set(Int(whiteType.rawValue), forKey: "chess_white_player")
         defaults.set(Int(blackType.rawValue), forKey: "chess_black_player")
+        // Save Lichess level to UserDefaults
+        defaults.set(lichessLevel, forKey: "lichess_level")
+        // Save Lichess token to Keychain
+        let trimmedToken = lichessToken.trimmingCharacters(in: .whitespaces)
+        if !trimmedToken.isEmpty {
+            do {
+                try KeychainStore.save(trimmedToken, forKey: "lichess_token")
+            } catch {
+                // Silently fail on Keychain save errors (non-critical)
+                print(
+                    "Warning: Failed to save Lichess token to Keychain: \(error)"
+                )
+            }
+        } else {
+            do {
+                try KeychainStore.delete(forKey: "lichess_token")
+            } catch {
+                // Silently fail on Keychain delete errors (non-critical)
+                print(
+                    "Warning: Failed to delete Lichess token from Keychain: \(error)"
+                )
+            }
+        }
     }
 
     #if DEBUG
@@ -127,8 +240,18 @@ struct NewGameView: View {
             let defaults = UserDefaults.standard
             defaults.removeObject(forKey: "chess_white_player")
             defaults.removeObject(forKey: "chess_black_player")
+            defaults.removeObject(forKey: "lichess_level")
+            do {
+                try KeychainStore.delete(forKey: "lichess_token")
+            } catch {
+                print(
+                    "Warning: Failed to delete Lichess token from Keychain: \(error)"
+                )
+            }
             whiteType = .human
             blackType = .remote
+            lichessToken = ""
+            lichessLevel = 3
             error = nil
         }
     #endif
@@ -138,5 +261,15 @@ struct NewGameView: View {
     #Preview("Idle") {
         NavigationStack { NewGameView() }
             .environment(BoardConnection(connectionState: .ready))
+    }
+    #Preview("Lichess Remote") {
+        NavigationStack { NewGameView() }
+            .environment(
+                BoardConnection(
+                    connectionState: .ready,
+                    whitePlayerType: .human,
+                    blackPlayerType: .remote
+                )
+            )
     }
 #endif
