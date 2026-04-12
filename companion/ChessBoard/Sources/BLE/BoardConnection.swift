@@ -1,4 +1,5 @@
 import CoreBluetooth
+import Foundation
 import Observation
 
 enum ConnectionState: Equatable {
@@ -36,7 +37,9 @@ extension ConnectionState {
 @Observable
 class BoardConnection {
     var connectionState: ConnectionState = .poweredOff
-    var gameStatus: GameStatus = .idle
+    var gameStatus: GameStatus = .idle {
+        didSet { handleGameStatusChange(gameStatus) }
+    }
     var lastCommandResult: CommandResult?
 
     /// Player types for each side, read from firmware on connect.
@@ -49,6 +52,19 @@ class BoardConnection {
 
     /// Last move played: (color: Turn, uci: String).
     var lastMove: (color: Turn, uci: String)?
+
+    /// Called when the board emits a MovePlayed notification.
+    var onMovePlayed: ((Turn, String) -> Void)?
+
+    /// Active Lichess bridge, if any. Owned here so it outlives NewGameView.
+    var lichessService: LichessService?
+
+    /// Lichess error message, preserved after the service is torn down.
+    /// This allows the UI to display the error even after the service is nilled.
+    var lichessError: String?
+
+    /// AI level to pass to LichessService.start() once the game reaches inProgress.
+    var pendingLichessLevel: Int?
 
     private var transport: BoardTransport?
 
@@ -155,6 +171,29 @@ class BoardConnection {
     /// Handles a move played notification from the board.
     func handleMovePlayed(color: Turn, uci: String) {
         lastMove = (color, uci)
+        onMovePlayed?(color, uci)
+    }
+
+    // MARK: - Lichess lifecycle
+
+    /// Reacts to game status changes to manage the Lichess service lifecycle.
+    private func handleGameStatusChange(_ status: GameStatus) {
+        if status == .inProgress, let service = lichessService,
+            let level = pendingLichessLevel
+        {
+            pendingLichessLevel = nil
+            Task { await service.start(level: level) }
+        }
+
+        if status.isTerminal || status == .idle {
+            lichessService?.stop()
+            // Copy error before nilling so the UI can display it
+            if let service = lichessService, let error = service.error {
+                lichessError = error
+            }
+            lichessService = nil
+            onMovePlayed = nil
+        }
     }
 
     func restartScanning() {
