@@ -50,6 +50,9 @@ class BoardConnection {
     /// Last move played: (color: Turn, uci: String).
     var lastMove: (color: Turn, uci: String)?
 
+    /// Called when the board emits a MovePlayed notification.
+    var onMovePlayed: ((Turn, String) -> Void)?
+
     private var transport: BoardTransport?
 
     /// Production initializer. Callers must provide the transport explicitly.
@@ -155,6 +158,7 @@ class BoardConnection {
     /// Handles a move played notification from the board.
     func handleMovePlayed(color: Turn, uci: String) {
         lastMove = (color, uci)
+        onMovePlayed?(color, uci)
     }
 
     func restartScanning() {
