@@ -5,57 +5,39 @@ import CoreBluetooth
 /// All UUIDs share the base `3d6343a2-xxxx-44ea-8fc2-3568d7216866`.
 enum GATT {
     static let gameService = CBUUID(
-        string: "3d6343a2-1001-44ea-8fc2-3568d7216866"
+        string: "3d6343a2-1010-44ea-8fc2-3568d7216866"
     )
     static let whitePlayer = CBUUID(
-        string: "3d6343a2-1002-44ea-8fc2-3568d7216866"
+        string: "3d6343a2-1011-44ea-8fc2-3568d7216866"
     )
     static let blackPlayer = CBUUID(
-        string: "3d6343a2-1003-44ea-8fc2-3568d7216866"
+        string: "3d6343a2-1012-44ea-8fc2-3568d7216866"
     )
     static let startGame = CBUUID(
-        string: "3d6343a2-1004-44ea-8fc2-3568d7216866"
+        string: "3d6343a2-1013-44ea-8fc2-3568d7216866"
     )
     static let matchControl = CBUUID(
-        string: "3d6343a2-1005-44ea-8fc2-3568d7216866"
+        string: "3d6343a2-1014-44ea-8fc2-3568d7216866"
     )
-    static let gameState = CBUUID(
-        string: "3d6343a2-1006-44ea-8fc2-3568d7216866"
+    static let gameStatus = CBUUID(
+        string: "3d6343a2-1015-44ea-8fc2-3568d7216866"
     )
     static let commandResult = CBUUID(
-        string: "3d6343a2-1007-44ea-8fc2-3568d7216866"
+        string: "3d6343a2-1016-44ea-8fc2-3568d7216866"
+    )
+    static let submitMove = CBUUID(
+        string: "3d6343a2-1017-44ea-8fc2-3568d7216866"
+    )
+    static let position = CBUUID(string: "3d6343a2-1018-44ea-8fc2-3568d7216866")
+    static let lastMove = CBUUID(string: "3d6343a2-1019-44ea-8fc2-3568d7216866")
+    static let movePlayed = CBUUID(
+        string: "3d6343a2-101a-44ea-8fc2-3568d7216866"
     )
 
-    static let wifiService = CBUUID(
-        string: "3d6343a2-2001-44ea-8fc2-3568d7216866"
-    )
-    static let lichessService = CBUUID(
-        string: "3d6343a2-3001-44ea-8fc2-3568d7216866"
-    )
-
-    static let wifiConfig = CBUUID(
-        string: "3d6343a2-2002-44ea-8fc2-3568d7216866"
-    )
-    static let wifiStatus = CBUUID(
-        string: "3d6343a2-2003-44ea-8fc2-3568d7216866"
-    )
-
-    static let lichessToken = CBUUID(
-        string: "3d6343a2-3002-44ea-8fc2-3568d7216866"
-    )
-    static let lichessStatus = CBUUID(
-        string: "3d6343a2-3003-44ea-8fc2-3568d7216866"
-    )
-
-    static let allServices = [gameService, wifiService, lichessService]
+    static let allServices = [gameService]
 
     static let gameCharacteristics: [CBUUID] = [
-        whitePlayer, blackPlayer, startGame, matchControl, gameState,
-        commandResult,
-    ]
-
-    static let wifiCharacteristics: [CBUUID] = [wifiConfig, wifiStatus]
-    static let lichessCharacteristics: [CBUUID] = [
-        lichessToken, lichessStatus,
+        whitePlayer, blackPlayer, startGame, matchControl,
+        gameStatus, commandResult, submitMove, position, lastMove, movePlayed,
     ]
 }

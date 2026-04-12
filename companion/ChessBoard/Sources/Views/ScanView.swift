@@ -104,7 +104,9 @@ struct ScanView: View {
     }
     #Preview("Connection Failed") {
         NavigationStack { ScanView() }
-            .environment(BoardConnection(connectionState: .connectionFailed))
+            .environment(
+                BoardConnection(connectionState: .connectionFailed)
+            )
     }
     #Preview("Setup Failed") {
         NavigationStack { ScanView() }

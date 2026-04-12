@@ -101,9 +101,9 @@ The diagnostics binary walks through three phases: assembly check (LED sweep →
 
 Without calibration, the firmware falls back to conservative defaults that may not work well for all boards.
 
-### Lichess Integration
+### Remote Player Architecture
 
-Lichess AI and other externally-managed opponents are available via the companion app. The board uses `RemotePlayer` to receive moves from an external source (the companion app or your own controller). This architecture allows the companion app to handle WiFi, API integration, and opponent management while the board focuses on piece detection and move validation.
+The board uses `RemotePlayer` to receive moves from an external source (e.g., the companion app or your own controller). The companion app handles configuring players, starting games, and can act as a bridge for remote opponents. Lichess integration is planned but not yet implemented.
 
 ## Development
 

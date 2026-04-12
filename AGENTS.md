@@ -4,7 +4,7 @@ Project-specific instructions for AI coding agents working in this repository.
 
 ## Project Overview
 
-ESP32-S3 smart chess board firmware in Rust, plus an iOS companion app (SwiftUI + CoreBluetooth). Hall-effect sensors detect per-color piece positions; LEDs provide move feedback. Uses `shakmaty` for chess logic. The companion app connects via BLE to configure players and start games. Supports human-vs-human and human-vs-remote (companion-managed AI or Lichess) modes.
+ESP32-S3 smart chess board firmware in Rust, plus an iOS companion app (SwiftUI + CoreBluetooth). Hall-effect sensors detect per-color piece positions; LEDs provide move feedback. Uses `shakmaty` for chess logic. The companion app connects via BLE to configure players and start games. Supports human-vs-human and human-vs-remote (companion-managed) modes.
 
 ## Build and Test Commands
 
@@ -124,7 +124,7 @@ Used by `ScriptedSensor` in `testutil/script.rs` and extensively in `player/huma
 
 ## Provisioning
 
-On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE, configures players, and starts games. Only sensor calibration data is persisted to NVS (in the separate `cal` partition). The companion app persists last-used player config to UserDefaults. WiFi/Lichess handling has moved to the companion app.
+On boot the board enters BLE advertising mode with the name "ChessBoard". The iOS companion app connects via BLE, configures players, and starts games. Only sensor calibration data is persisted to NVS (in the separate `cal` partition). The companion app persists last-used player config to UserDefaults.
 
 `just erase-nvs` clears the main NVS partition. It does not affect sensor calibration.
 

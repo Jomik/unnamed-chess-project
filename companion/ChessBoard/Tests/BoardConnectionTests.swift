@@ -7,49 +7,15 @@ final class BoardConnectionTests: XCTestCase {
     func testInitialState() {
         let board = BoardConnection(connectionState: .ready)
         XCTAssertEqual(board.connectionState, .ready)
-        XCTAssertEqual(board.gameState, .initial)
-        XCTAssertEqual(board.wifiStatus, .disconnected)
-        XCTAssertEqual(board.lichessStatus, .idle)
+        XCTAssertEqual(board.gameStatus, .idle)
         XCTAssertNil(board.lastCommandResult)
-    }
-
-    func testConfigureWifiSetsConnecting() {
-        let board = BoardConnection(connectionState: .ready)
-        board.configureWifi(ssid: "test", password: "pass", authMode: .wpa2)
-        XCTAssertEqual(board.wifiStatus.state, .connecting)
-    }
-
-    func testConfigureWifiNoOpWithoutTransport() {
-        let board = BoardConnection(connectionState: .ready)
-        board.configureWifi(ssid: "test", password: "pass", authMode: .wpa2)
-        // Local state update happens, but no BLE write (transport is nil)
-        XCTAssertEqual(board.wifiStatus.state, .connecting)
-    }
-
-    func testSetLichessTokenSetsValidating() {
-        let board = BoardConnection(connectionState: .ready)
-        board.setLichessToken("lip_abc123")
-        XCTAssertEqual(board.lichessStatus.state, .validating)
-    }
-
-    func testSetLichessTokenRejectsLongToken() {
-        let board = BoardConnection(connectionState: .ready)
-        let longToken = String(repeating: "a", count: 256)
-        board.setLichessToken(longToken)
-        // Should not change status because token is too long
-        XCTAssertEqual(board.lichessStatus, .idle)
     }
 
     func testConfigureAndStartSetsPlayerTypes() {
         let board = BoardConnection(connectionState: .ready)
-        board.configureAndStart(
-            white: .human,
-            whiteLevel: 0,
-            black: .lichessAi,
-            blackLevel: 4
-        )
+        board.configureAndStart(white: .human, black: .remote)
         XCTAssertEqual(board.whitePlayerType, .human)
-        XCTAssertEqual(board.blackPlayerType, .lichessAi)
+        XCTAssertEqual(board.blackPlayerType, .remote)
     }
 
     func testConfigureAndStartGuardsNotReady() {
@@ -58,12 +24,7 @@ final class BoardConnectionTests: XCTestCase {
             whitePlayerType: nil,
             blackPlayerType: nil
         )
-        board.configureAndStart(
-            white: .human,
-            whiteLevel: 0,
-            black: .embedded,
-            blackLevel: 0
-        )
+        board.configureAndStart(white: .human, black: .remote)
         XCTAssertNil(board.whitePlayerType)
     }
 
@@ -73,7 +34,7 @@ final class BoardConnectionTests: XCTestCase {
             lastCommandResult: CommandResult(
                 ok: true,
                 source: .startGame,
-                message: ""
+                error: nil
             )
         )
         board.resign(color: .white)
@@ -84,7 +45,7 @@ final class BoardConnectionTests: XCTestCase {
         let board = BoardConnection(
             connectionState: .ready,
             whitePlayerType: .human,
-            blackPlayerType: .embedded
+            blackPlayerType: .remote
         )
         XCTAssertEqual(board.humanColor, .white)
     }
@@ -122,7 +83,7 @@ final class BoardConnectionTests: XCTestCase {
         // Simulate fresh app start: player types are nil, game still in progress on firmware
         let board = BoardConnection(
             connectionState: .ready,
-            gameState: GameState(status: .inProgress, turn: .white),
+            gameStatus: .inProgress,
             whitePlayerType: nil,
             blackPlayerType: nil
         )
@@ -131,19 +92,82 @@ final class BoardConnectionTests: XCTestCase {
 
         // Simulate BLE transport reading player types from firmware
         board.whitePlayerType = .human
-        board.blackPlayerType = .embedded
+        board.blackPlayerType = .remote
 
         // Now resign should work — human is white
         XCTAssertEqual(board.resignColor, .white)
     }
 
+    func testResignColorHumanVsHuman() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            gameStatus: .inProgress,
+            currentPosition:
+                "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+            whitePlayerType: .human,
+            blackPlayerType: .human
+        )
+        XCTAssertEqual(board.resignColor, .black)
+    }
+
+    func testResignColorHumanVsHumanNoPosition() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            gameStatus: .inProgress,
+            whitePlayerType: .human,
+            blackPlayerType: .human
+        )
+        XCTAssertNil(board.resignColor)
+    }
+
     func testResignColorNilWhenPlayersUnset() {
         let board = BoardConnection(
             connectionState: .ready,
-            gameState: GameState(status: .inProgress, turn: .white),
+            gameStatus: .inProgress,
             whitePlayerType: nil,
             blackPlayerType: nil
         )
         XCTAssertNil(board.resignColor)
+    }
+
+    func testCancelGameClearsLastCommandResult() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            lastCommandResult: CommandResult(
+                ok: true,
+                source: .startGame,
+                error: nil
+            )
+        )
+        board.cancelGame()
+        XCTAssertNil(board.lastCommandResult)
+    }
+
+    func testSubmitMoveClearsLastCommandResult() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            lastCommandResult: CommandResult(
+                ok: false,
+                source: .startGame,
+                error: nil
+            )
+        )
+        board.submitMove("e2e4")
+        XCTAssertNil(board.lastCommandResult)
+    }
+
+    func testSubmitMoveTooLongIsIgnored() {
+        let board = BoardConnection(
+            connectionState: .ready,
+            lastCommandResult: CommandResult(
+                ok: true,
+                source: .startGame,
+                error: nil
+            )
+        )
+        // A string longer than 255 bytes must not clear lastCommandResult
+        let longMove = String(repeating: "a", count: 256)
+        board.submitMove(longMove)
+        XCTAssertNotNil(board.lastCommandResult)
     }
 }
