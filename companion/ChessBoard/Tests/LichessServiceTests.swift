@@ -1,4 +1,5 @@
-import XCTest
+import Foundation
+import Testing
 
 @testable import ChessBoard
 
@@ -51,11 +52,11 @@ final class MockLichessAPI: LichessAPIProtocol, @unchecked Sendable {
 
 // MARK: - LichessServiceTests
 
-@MainActor
-final class LichessServiceTests: XCTestCase {
+@MainActor @Suite(.serialized)
+struct LichessServiceTests {
     // MARK: - Echo suppression
 
-    func testBoardMovePlayedForwardsHumanMoves() async {
+    @Test func boardMovePlayedForwardsHumanMoves() async {
         let api = MockLichessAPI()
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
@@ -75,11 +76,11 @@ final class LichessServiceTests: XCTestCase {
         // to schedule and complete the child Task.
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(api.makeMoveCallCount, 1)
-        XCTAssertEqual(api.makeMoveArgs.first?.uci, "e2e4")
+        #expect(api.makeMoveCallCount == 1)
+        #expect(api.makeMoveArgs.first?.uci == "e2e4")
     }
 
-    func testBoardMovePlayedIgnoresAIMoves() async {
+    @Test func boardMovePlayedIgnoresAIMoves() async {
         let api = MockLichessAPI()
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
@@ -96,14 +97,13 @@ final class LichessServiceTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(
-            api.makeMoveCallCount,
-            0,
+        #expect(
+            api.makeMoveCallCount == 0,
             "AI echo must not be forwarded to Lichess"
         )
     }
 
-    func testBoardMovePlayedIgnoresWhenNotActive() async {
+    @Test func boardMovePlayedIgnoresWhenNotActive() async {
         let api = MockLichessAPI()
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
@@ -119,10 +119,10 @@ final class LichessServiceTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(api.makeMoveCallCount, 0)
+        #expect(api.makeMoveCallCount == 0)
     }
 
-    func testBoardMovePlayedIgnoresWhenNoGameId() async {
+    @Test func boardMovePlayedIgnoresWhenNoGameId() async {
         let api = MockLichessAPI()
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
@@ -138,12 +138,12 @@ final class LichessServiceTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(api.makeMoveCallCount, 0)
+        #expect(api.makeMoveCallCount == 0)
     }
 
     // MARK: - Terminal state handling
 
-    func testTerminalGameStateTriggersCancelGame() async {
+    @Test func terminalGameStateTriggersCancelGame() async {
         let api = MockLichessAPI()
         api.streamEvents = [
             .gameState(moves: "e2e4 e7e5", status: "mate", winner: "white")
@@ -161,15 +161,15 @@ final class LichessServiceTests: XCTestCase {
         // Give the stream task time to run
         try? await Task.sleep(for: .milliseconds(50))
 
-        XCTAssertFalse(
-            service.isActive,
+        #expect(
+            !service.isActive,
             "Service should be inactive after terminal gameState"
         )
         // board.cancelGame() should have been called — verify via isActive
         // (cancelGame writes through MockTransport; isActive is the primary signal)
     }
 
-    func testResignGameStateTriggersCancelGame() async {
+    @Test func resignGameStateTriggersCancelGame() async {
         let api = MockLichessAPI()
         api.streamEvents = [
             .gameState(moves: "e2e4", status: "resign", winner: "white")
@@ -186,10 +186,10 @@ final class LichessServiceTests: XCTestCase {
 
         try? await Task.sleep(for: .milliseconds(50))
 
-        XCTAssertFalse(service.isActive)
+        #expect(!service.isActive)
     }
 
-    func testStalemateGameStateTriggersCancelGame() async {
+    @Test func stalemateGameStateTriggersCancelGame() async {
         let api = MockLichessAPI()
         api.streamEvents = [
             .gameState(moves: "e2e4 e7e5", status: "stalemate", winner: nil)
@@ -206,12 +206,12 @@ final class LichessServiceTests: XCTestCase {
 
         try? await Task.sleep(for: .milliseconds(50))
 
-        XCTAssertFalse(service.isActive)
+        #expect(!service.isActive)
     }
 
     // MARK: - start() lifecycle
 
-    func testStartSetsGameId() async {
+    @Test func startSetsGameId() async {
         let api = MockLichessAPI()
         api.challengeAIResult = .success("new-game-42")
         api.streamEvents = []
@@ -225,11 +225,11 @@ final class LichessServiceTests: XCTestCase {
 
         await service.start(level: 2)
 
-        XCTAssertEqual(service.gameId, "new-game-42")
-        XCTAssertTrue(service.isActive)
+        #expect(service.gameId == "new-game-42")
+        #expect(service.isActive)
     }
 
-    func testStartSetsErrorOnAPIFailure() async {
+    @Test func startSetsErrorOnAPIFailure() async {
         struct FakeError: Error, LocalizedError {
             var errorDescription: String? { "Network error" }
         }
@@ -245,13 +245,13 @@ final class LichessServiceTests: XCTestCase {
 
         await service.start(level: 1)
 
-        XCTAssertFalse(service.isActive)
-        XCTAssertNotNil(service.error)
+        #expect(!service.isActive)
+        #expect(service.error != nil)
     }
 
     // MARK: - stop()
 
-    func testStopCancelsStreamAndResigns() async {
+    @Test func stopCancelsStreamAndResigns() async {
         let api = MockLichessAPI()
         api.streamEvents = []
         let board = BoardConnection(transport: MockTransport())
@@ -263,22 +263,22 @@ final class LichessServiceTests: XCTestCase {
         )
 
         await service.start(level: 1)
-        XCTAssertTrue(service.isActive)
+        #expect(service.isActive)
         let capturedGameId = service.gameId
 
         service.stop()
 
-        XCTAssertFalse(service.isActive)
-        XCTAssertNil(service.gameId)
+        #expect(!service.isActive)
+        #expect(service.gameId == nil)
 
         // Allow the resign Task to run
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(api.resignCallCount, 1)
-        XCTAssertEqual(api.resignArgs.first, capturedGameId)
+        #expect(api.resignCallCount == 1)
+        #expect(api.resignArgs.first == capturedGameId)
     }
 
-    func testStopWhenNotActiveDoesNotResign() async {
+    @Test func stopWhenNotActiveDoesNotResign() async {
         let api = MockLichessAPI()
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
@@ -292,12 +292,12 @@ final class LichessServiceTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(api.resignCallCount, 0)
+        #expect(api.resignCallCount == 0)
     }
 
     // MARK: - Echo suppression with human as black
 
-    func testEchoSuppressionHumanIsBlack() async {
+    @Test func echoSuppressionHumanIsBlack() async {
         let api = MockLichessAPI()
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
@@ -314,9 +314,8 @@ final class LichessServiceTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(
-            api.makeMoveCallCount,
-            0,
+        #expect(
+            api.makeMoveCallCount == 0,
             "White move must be suppressed when human is black"
         )
 
@@ -325,7 +324,7 @@ final class LichessServiceTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(api.makeMoveCallCount, 1)
-        XCTAssertEqual(api.makeMoveArgs.first?.uci, "e7e5")
+        #expect(api.makeMoveCallCount == 1)
+        #expect(api.makeMoveArgs.first?.uci == "e7e5")
     }
 }
