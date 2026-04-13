@@ -1,137 +1,137 @@
-import XCTest
+import Testing
 
 @testable import ChessBoard
 
 // MARK: - LichessAPITests
 
-final class LichessAPITests: XCTestCase {
+@Suite struct LichessAPITests {
     // MARK: - parseLine tests (via streamGame parsing logic)
     // We test parsing indirectly by feeding sample Lichess NDJSON responses
     // through a mock URLSession.
 
-    func testParseGameFullEvent() throws {
+    @Test func parseGameFullEvent() throws {
         let line = """
             {"type":"gameFull","id":"abc123","opponent":{"aiLevel":3},"state":{"moves":"e2e4 e7e5","status":"started"}}
             """
-        let event = parseLineForTest(line)
+        let event = try #require(parseLineForTest(line))
         guard case .gameFull(let id, let initialMoves, let aiLevel) = event
         else {
-            XCTFail("Expected gameFull, got \(String(describing: event))")
+            Issue.record("Expected gameFull, got \(event)")
             return
         }
-        XCTAssertEqual(id, "abc123")
-        XCTAssertEqual(initialMoves, "e2e4 e7e5")
-        XCTAssertEqual(aiLevel, 3)
+        #expect(id == "abc123")
+        #expect(initialMoves == "e2e4 e7e5")
+        #expect(aiLevel == 3)
     }
 
-    func testParseGameFullEventNoMoves() throws {
+    @Test func parseGameFullEventNoMoves() throws {
         let line = """
             {"type":"gameFull","id":"xyz","opponent":{"aiLevel":1},"state":{"moves":"","status":"started"}}
             """
-        let event = parseLineForTest(line)
+        let event = try #require(parseLineForTest(line))
         guard case .gameFull(let id, let initialMoves, let aiLevel) = event
         else {
-            XCTFail("Expected gameFull, got \(String(describing: event))")
+            Issue.record("Expected gameFull, got \(event)")
             return
         }
-        XCTAssertEqual(id, "xyz")
-        XCTAssertEqual(initialMoves, "")
-        XCTAssertEqual(aiLevel, 1)
+        #expect(id == "xyz")
+        #expect(initialMoves == "")
+        #expect(aiLevel == 1)
     }
 
-    func testParseGameFullEventMissingId() {
+    @Test func parseGameFullEventMissingId() {
         let line = """
             {"type":"gameFull","opponent":{"aiLevel":1},"state":{"moves":""}}
             """
         let event = parseLineForTest(line)
-        XCTAssertNil(event, "Should return nil when id is missing")
+        #expect(event == nil, "Should return nil when id is missing")
     }
 
-    func testParseGameFullEventMissingOpponent() {
+    @Test func parseGameFullEventMissingOpponent() throws {
         // When opponent key is absent, aiLevel defaults to 1
         let line = """
             {"type":"gameFull","id":"abc","state":{"moves":""}}
             """
-        let event = parseLineForTest(line)
+        let event = try #require(parseLineForTest(line))
         guard case .gameFull(let id, _, let aiLevel) = event else {
-            XCTFail("Expected gameFull, got \(String(describing: event))")
+            Issue.record("Expected gameFull, got \(event)")
             return
         }
-        XCTAssertEqual(id, "abc")
-        XCTAssertEqual(aiLevel, 1)
+        #expect(id == "abc")
+        #expect(aiLevel == 1)
     }
 
-    func testParseGameStateEvent() {
+    @Test func parseGameStateEvent() throws {
         let line = """
             {"type":"gameState","moves":"e2e4 e7e5 g1f3","status":"started","winner":null}
             """
-        let event = parseLineForTest(line)
+        let event = try #require(parseLineForTest(line))
         guard case .gameState(let moves, let status, let winner) = event else {
-            XCTFail("Expected gameState, got \(String(describing: event))")
+            Issue.record("Expected gameState, got \(event)")
             return
         }
-        XCTAssertEqual(moves, "e2e4 e7e5 g1f3")
-        XCTAssertEqual(status, "started")
-        XCTAssertNil(winner)
+        #expect(moves == "e2e4 e7e5 g1f3")
+        #expect(status == "started")
+        #expect(winner == nil)
     }
 
-    func testParseGameStateEventWithWinner() {
+    @Test func parseGameStateEventWithWinner() throws {
         let line = """
             {"type":"gameState","moves":"e2e4 e7e5","status":"mate","winner":"white"}
             """
-        let event = parseLineForTest(line)
+        let event = try #require(parseLineForTest(line))
         guard case .gameState(let moves, let status, let winner) = event else {
-            XCTFail("Expected gameState, got \(String(describing: event))")
+            Issue.record("Expected gameState, got \(event)")
             return
         }
-        XCTAssertEqual(moves, "e2e4 e7e5")
-        XCTAssertEqual(status, "mate")
-        XCTAssertEqual(winner, "white")
+        #expect(moves == "e2e4 e7e5")
+        #expect(status == "mate")
+        #expect(winner == "white")
     }
 
-    func testParseGameStateMissingMoves() {
+    @Test func parseGameStateMissingMoves() {
         let line = """
             {"type":"gameState","status":"started"}
             """
         let event = parseLineForTest(line)
-        XCTAssertNil(event, "Should return nil when moves field is missing")
+        #expect(event == nil, "Should return nil when moves field is missing")
     }
 
-    func testParseGameStateMissingStatus() {
+    @Test func parseGameStateMissingStatus() {
         let line = """
             {"type":"gameState","moves":"e2e4"}
             """
         let event = parseLineForTest(line)
-        XCTAssertNil(event, "Should return nil when status field is missing")
+        #expect(event == nil, "Should return nil when status field is missing")
     }
 
-    func testParseUnknownType() {
+    @Test func parseUnknownType() {
         let line = """
             {"type":"ping"}
             """
         let event = parseLineForTest(line)
-        XCTAssertNil(event, "Should return nil for unknown event types")
+        #expect(event == nil, "Should return nil for unknown event types")
     }
 
-    func testParseEmptyString() {
-        XCTAssertNil(parseLineForTest(""))
+    @Test func parseEmptyString() {
+        #expect(parseLineForTest("") == nil)
     }
 
-    func testParseInvalidJSON() {
-        XCTAssertNil(parseLineForTest("not json"))
+    @Test func parseInvalidJSON() {
+        #expect(parseLineForTest("not json") == nil)
     }
 
-    func testParseGameFullMissingStateKey() {
+    @Test func parseGameFullMissingStateKey() throws {
         // State key absent → initialMoves defaults to ""
         let line = """
             {"type":"gameFull","id":"abc","opponent":{"aiLevel":2}}
             """
-        let event = parseLineForTest(line)
+        let event = try #require(parseLineForTest(line))
         guard case .gameFull(_, let initialMoves, _) = event else {
-            XCTFail("Expected gameFull")
+            Issue.record("Expected gameFull")
             return
         }
-        XCTAssertEqual(initialMoves, "")
+        #expect(initialMoves == "")
     }
 
     // MARK: - Helpers
