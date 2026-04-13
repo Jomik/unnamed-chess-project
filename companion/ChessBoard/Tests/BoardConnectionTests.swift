@@ -150,4 +150,16 @@ final class BoardConnectionTests: XCTestCase {
         board.submitMove(longMove)
         XCTAssertNotNil(board.lastCommandResult)
     }
+
+    func testConfigureAndStartWritesCorrectBytes() {
+        let transport = MockTransport()
+        let board = BoardConnection(transport: transport)
+        board.connectionState = .ready
+
+        board.configureAndStart(white: .human, black: .remote)
+
+        XCTAssertEqual(transport.writeCallCount, 1)
+        XCTAssertEqual(transport.writeArgs[0].data, Data([0x00, 0x01]))
+        XCTAssertEqual(transport.writeArgs[0].characteristic, GATT.startGame)
+    }
 }

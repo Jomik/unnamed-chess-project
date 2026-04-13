@@ -165,9 +165,8 @@ final class LichessServiceTests: XCTestCase {
             service.isActive,
             "Service should be inactive after terminal gameState"
         )
-        // board.cancelGame() should have been called — verify via lastCommandResult
-        // (cancelGame calls transport?.write but transport is nil in tests;
-        //  we verify the service's isActive is false as the primary signal)
+        // board.cancelGame() should have been called — verify via isActive
+        // (cancelGame writes through MockTransport; isActive is the primary signal)
     }
 
     func testResignGameStateTriggersCancelGame() async {
