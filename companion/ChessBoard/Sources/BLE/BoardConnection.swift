@@ -66,34 +66,13 @@ class BoardConnection {
     /// AI level to pass to LichessService.start() once the game reaches inProgress.
     var pendingLichessLevel: Int?
 
-    private var transport: BoardTransport?
+    private let transport: BoardTransport
 
     /// Production initializer. Callers must provide the transport explicitly.
     init(transport: BoardTransport) {
         self.transport = transport
         transport.owner = self
     }
-
-    #if DEBUG
-        /// Creates a BoardConnection with pre-set state and no BLE transport.
-        /// Commands are no-ops (transport is nil). For use in #Preview macros.
-        init(
-            connectionState: ConnectionState = .ready,
-            gameStatus: GameStatus = .idle,
-            currentPosition: String? = nil,
-            lastCommandResult: CommandResult? = nil,
-            whitePlayerType: PlayerType? = .human,
-            blackPlayerType: PlayerType? = .remote
-        ) {
-            self.transport = nil
-            self.connectionState = connectionState
-            self.gameStatus = gameStatus
-            self.currentPosition = currentPosition
-            self.lastCommandResult = lastCommandResult
-            self.whitePlayerType = whitePlayerType
-            self.blackPlayerType = blackPlayerType
-        }
-    #endif
 
     /// The human player's color (nil if both or neither are human).
     var humanColor: Turn? {
@@ -134,7 +113,7 @@ class BoardConnection {
         blackPlayerType = black
         lastCommandResult = nil
 
-        transport?.write(
+        transport.write(
             Data([white.rawValue, black.rawValue]),
             to: GATT.startGame
         )
@@ -145,7 +124,7 @@ class BoardConnection {
     /// Wire format: `[action: u8 (0x00 = resign), color: u8]`
     func resign(color: Turn) {
         lastCommandResult = nil
-        transport?.write(Data([0x00, color.rawValue]), to: GATT.matchControl)
+        transport.write(Data([0x00, color.rawValue]), to: GATT.matchControl)
     }
 
     /// Sends a cancel/abort command via Match Control.
@@ -153,7 +132,7 @@ class BoardConnection {
     /// Wire format: `[action: u8 (0x01 = cancel)]`
     func cancelGame() {
         lastCommandResult = nil
-        transport?.write(Data([0x01]), to: GATT.matchControl)
+        transport.write(Data([0x01]), to: GATT.matchControl)
     }
 
     /// Sends a move to the board.
@@ -165,7 +144,7 @@ class BoardConnection {
         lastCommandResult = nil
         var data = Data([UInt8(bytes.count)])
         data.append(contentsOf: bytes)
-        transport?.write(data, to: GATT.submitMove)
+        transport.write(data, to: GATT.submitMove)
     }
 
     /// Handles a move played notification from the board.
@@ -197,19 +176,19 @@ class BoardConnection {
     }
 
     func restartScanning() {
-        transport?.restartScanning()
+        transport.restartScanning()
     }
 
     func connectionTimedOut() {
         switch connectionState {
         case .scanning:
-            transport?.stopScanning()
+            transport.stopScanning()
             connectionState = .notFound
         case .connecting:
-            transport?.cancelConnection()
+            transport.cancelConnection()
             connectionState = .connectionFailed
         case .discoveringServices:
-            transport?.cancelConnection()
+            transport.cancelConnection()
             connectionState = .setupFailed
         default:
             break

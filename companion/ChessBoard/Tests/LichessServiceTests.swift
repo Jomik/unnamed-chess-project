@@ -57,7 +57,8 @@ final class LichessServiceTests: XCTestCase {
 
     func testBoardMovePlayedForwardsHumanMoves() async {
         let api = MockLichessAPI()
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -80,7 +81,8 @@ final class LichessServiceTests: XCTestCase {
 
     func testBoardMovePlayedIgnoresAIMoves() async {
         let api = MockLichessAPI()
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -103,7 +105,8 @@ final class LichessServiceTests: XCTestCase {
 
     func testBoardMovePlayedIgnoresWhenNotActive() async {
         let api = MockLichessAPI()
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -121,7 +124,8 @@ final class LichessServiceTests: XCTestCase {
 
     func testBoardMovePlayedIgnoresWhenNoGameId() async {
         let api = MockLichessAPI()
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -144,7 +148,8 @@ final class LichessServiceTests: XCTestCase {
         api.streamEvents = [
             .gameState(moves: "e2e4 e7e5", status: "mate", winner: "white")
         ]
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -160,9 +165,8 @@ final class LichessServiceTests: XCTestCase {
             service.isActive,
             "Service should be inactive after terminal gameState"
         )
-        // board.cancelGame() should have been called — verify via lastCommandResult
-        // (cancelGame calls transport?.write but transport is nil in tests;
-        //  we verify the service's isActive is false as the primary signal)
+        // board.cancelGame() should have been called — verify via isActive
+        // (cancelGame writes through MockTransport; isActive is the primary signal)
     }
 
     func testResignGameStateTriggersCancelGame() async {
@@ -170,7 +174,8 @@ final class LichessServiceTests: XCTestCase {
         api.streamEvents = [
             .gameState(moves: "e2e4", status: "resign", winner: "white")
         ]
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -189,7 +194,8 @@ final class LichessServiceTests: XCTestCase {
         api.streamEvents = [
             .gameState(moves: "e2e4 e7e5", status: "stalemate", winner: nil)
         ]
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -209,7 +215,8 @@ final class LichessServiceTests: XCTestCase {
         let api = MockLichessAPI()
         api.challengeAIResult = .success("new-game-42")
         api.streamEvents = []
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -228,7 +235,8 @@ final class LichessServiceTests: XCTestCase {
         }
         let api = MockLichessAPI()
         api.challengeAIResult = .failure(FakeError())
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -246,7 +254,8 @@ final class LichessServiceTests: XCTestCase {
     func testStopCancelsStreamAndResigns() async {
         let api = MockLichessAPI()
         api.streamEvents = []
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -271,7 +280,8 @@ final class LichessServiceTests: XCTestCase {
 
     func testStopWhenNotActiveDoesNotResign() async {
         let api = MockLichessAPI()
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
@@ -289,7 +299,8 @@ final class LichessServiceTests: XCTestCase {
 
     func testEchoSuppressionHumanIsBlack() async {
         let api = MockLichessAPI()
-        let board = BoardConnection(connectionState: .ready)
+        let board = BoardConnection(transport: MockTransport())
+        board.connectionState = .ready
         let service = LichessService(
             api: api,
             board: board,
