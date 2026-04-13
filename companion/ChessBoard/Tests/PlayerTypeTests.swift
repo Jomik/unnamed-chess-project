@@ -1,34 +1,35 @@
-import XCTest
+import Foundation
+import Testing
 
 @testable import ChessBoard
 
-final class PlayerTypeTests: XCTestCase {
-    func testEncodeHuman() {
-        XCTAssertEqual(PlayerType.human.encode(), Data([0x00]))
+@Suite struct PlayerTypeTests {
+    @Test func encodeHuman() {
+        #expect(PlayerType.human.encode() == Data([0x00]))
     }
 
-    func testEncodeRemote() {
-        XCTAssertEqual(PlayerType.remote.encode(), Data([0x01]))
+    @Test func encodeRemote() {
+        #expect(PlayerType.remote.encode() == Data([0x01]))
     }
 
-    func testEncodedLengths() {
-        XCTAssertEqual(PlayerType.human.encode().count, 1)
-        XCTAssertEqual(PlayerType.remote.encode().count, 1)
+    @Test func encodedLengths() {
+        #expect(PlayerType.human.encode().count == 1)
+        #expect(PlayerType.remote.encode().count == 1)
     }
 
-    func testDecodeHuman() {
-        XCTAssertEqual(PlayerType.decode(Data([0x00])), .human)
+    @Test func decodeHuman() {
+        #expect(PlayerType.decode(Data([0x00])) == .human)
     }
 
-    func testDecodeRemote() {
-        XCTAssertEqual(PlayerType.decode(Data([0x01])), .remote)
+    @Test func decodeRemote() {
+        #expect(PlayerType.decode(Data([0x01])) == .remote)
     }
 
-    func testDecodeUnknown() {
-        XCTAssertNil(PlayerType.decode(Data([0xFF])))
+    @Test func decodeUnknown() {
+        #expect(PlayerType.decode(Data([0xFF])) == nil)
     }
 
-    func testDecodeEmpty() {
-        XCTAssertNil(PlayerType.decode(Data()))
+    @Test func decodeEmpty() {
+        #expect(PlayerType.decode(Data()) == nil)
     }
 }
