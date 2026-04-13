@@ -258,18 +258,10 @@ struct NewGameView: View {
 }
 
 #if DEBUG
-    #Preview("Idle") {
+    #Preview("Idle", traits: .modifier(MockBoard())) {
         NavigationStack { NewGameView() }
-            .environment(BoardConnection(connectionState: .ready))
     }
-    #Preview("Lichess Remote") {
+    #Preview("Lichess Remote", traits: .modifier(MockBoard())) {
         NavigationStack { NewGameView() }
-            .environment(
-                BoardConnection(
-                    connectionState: .ready,
-                    whitePlayerType: .human,
-                    blackPlayerType: .remote
-                )
-            )
     }
 #endif

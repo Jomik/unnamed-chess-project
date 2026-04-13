@@ -78,46 +78,38 @@ struct ActiveGameView: View {
 }
 
 #if DEBUG
-    #Preview("Awaiting Pieces") {
+    #Preview(
+        "Awaiting Pieces",
+        traits: .modifier(MockBoard(gameStatus: .awaitingPieces))
+    ) {
         NavigationStack { ActiveGameView() }
-            .environment(
-                BoardConnection(
-                    gameStatus: .awaitingPieces
-                )
-            )
     }
-    #Preview("In Progress") {
-        NavigationStack { ActiveGameView() }
-            .environment(
-                BoardConnection(
-                    gameStatus: .inProgress,
-                    currentPosition:
-                        "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
-                )
+    #Preview(
+        "In Progress",
+        traits: .modifier(
+            MockBoard(
+                gameStatus: .inProgress,
+                currentPosition:
+                    "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
             )
+        )
+    ) {
+        NavigationStack { ActiveGameView() }
     }
-    #Preview("Checkmate") {
+    #Preview(
+        "Checkmate",
+        traits: .modifier(MockBoard(gameStatus: .checkmate(loser: .black)))
+    ) {
         NavigationStack { ActiveGameView() }
-            .environment(
-                BoardConnection(
-                    gameStatus: .checkmate(loser: .black)
-                )
-            )
     }
-    #Preview("Resigned") {
+    #Preview(
+        "Resigned",
+        traits: .modifier(MockBoard(gameStatus: .resigned(color: .white)))
+    ) {
         NavigationStack { ActiveGameView() }
-            .environment(
-                BoardConnection(
-                    gameStatus: .resigned(color: .white)
-                )
-            )
     }
-    #Preview("Stalemate") {
+    #Preview("Stalemate", traits: .modifier(MockBoard(gameStatus: .stalemate)))
+    {
         NavigationStack { ActiveGameView() }
-            .environment(
-                BoardConnection(
-                    gameStatus: .stalemate
-                )
-            )
     }
 #endif
