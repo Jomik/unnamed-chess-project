@@ -74,27 +74,6 @@ class BoardConnection {
         transport.owner = self
     }
 
-    #if DEBUG
-        /// Creates a BoardConnection with pre-set state and no BLE transport.
-        /// Commands are no-ops (transport is nil). For use in #Preview macros.
-        init(
-            connectionState: ConnectionState = .ready,
-            gameStatus: GameStatus = .idle,
-            currentPosition: String? = nil,
-            lastCommandResult: CommandResult? = nil,
-            whitePlayerType: PlayerType? = .human,
-            blackPlayerType: PlayerType? = .remote
-        ) {
-            self.transport = nil
-            self.connectionState = connectionState
-            self.gameStatus = gameStatus
-            self.currentPosition = currentPosition
-            self.lastCommandResult = lastCommandResult
-            self.whitePlayerType = whitePlayerType
-            self.blackPlayerType = blackPlayerType
-        }
-    #endif
-
     /// The human player's color (nil if both or neither are human).
     var humanColor: Turn? {
         switch (whitePlayerType, blackPlayerType) {
