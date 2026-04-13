@@ -1,87 +1,84 @@
-import XCTest
+import Foundation
+import Testing
 
 @testable import ChessBoard
 
-final class GameStatusTests: XCTestCase {
-    func testDecodeIdle() {
-        XCTAssertEqual(GameStatus.decode(Data([0x00])), .idle)
+@Suite struct GameStatusTests {
+    @Test func decodeIdle() {
+        #expect(GameStatus.decode(Data([0x00])) == .idle)
     }
 
-    func testDecodeAwaitingPieces() {
-        XCTAssertEqual(GameStatus.decode(Data([0x01])), .awaitingPieces)
+    @Test func decodeAwaitingPieces() {
+        #expect(GameStatus.decode(Data([0x01])) == .awaitingPieces)
     }
 
-    func testDecodeInProgress() {
-        XCTAssertEqual(GameStatus.decode(Data([0x02])), .inProgress)
+    @Test func decodeInProgress() {
+        #expect(GameStatus.decode(Data([0x02])) == .inProgress)
     }
 
-    func testDecodeCheckmateWhiteLoser() {
-        XCTAssertEqual(
-            GameStatus.decode(Data([0x03, 0x00])),
-            .checkmate(loser: .white)
+    @Test func decodeCheckmateWhiteLoser() {
+        #expect(
+            GameStatus.decode(Data([0x03, 0x00])) == .checkmate(loser: .white)
         )
     }
 
-    func testDecodeCheckmateBlackLoser() {
-        XCTAssertEqual(
-            GameStatus.decode(Data([0x03, 0x01])),
-            .checkmate(loser: .black)
+    @Test func decodeCheckmateBlackLoser() {
+        #expect(
+            GameStatus.decode(Data([0x03, 0x01])) == .checkmate(loser: .black)
         )
     }
 
-    func testDecodeCheckmateMissingLoser() {
-        XCTAssertNil(GameStatus.decode(Data([0x03])))
+    @Test func decodeCheckmateMissingLoser() {
+        #expect(GameStatus.decode(Data([0x03])) == nil)
     }
 
-    func testDecodeCheckmateInvalidLoser() {
-        XCTAssertNil(GameStatus.decode(Data([0x03, 0xFF])))
+    @Test func decodeCheckmateInvalidLoser() {
+        #expect(GameStatus.decode(Data([0x03, 0xFF])) == nil)
     }
 
-    func testDecodeStalemate() {
-        XCTAssertEqual(GameStatus.decode(Data([0x04])), .stalemate)
+    @Test func decodeStalemate() {
+        #expect(GameStatus.decode(Data([0x04])) == .stalemate)
     }
 
-    func testDecodeResignedWhite() {
-        XCTAssertEqual(
-            GameStatus.decode(Data([0x05, 0x00])),
-            .resigned(color: .white)
+    @Test func decodeResignedWhite() {
+        #expect(
+            GameStatus.decode(Data([0x05, 0x00])) == .resigned(color: .white)
         )
     }
 
-    func testDecodeResignedBlack() {
-        XCTAssertEqual(
-            GameStatus.decode(Data([0x05, 0x01])),
-            .resigned(color: .black)
+    @Test func decodeResignedBlack() {
+        #expect(
+            GameStatus.decode(Data([0x05, 0x01])) == .resigned(color: .black)
         )
     }
 
-    func testDecodeResignedMissingColor() {
-        XCTAssertNil(GameStatus.decode(Data([0x05])))
+    @Test func decodeResignedMissingColor() {
+        #expect(GameStatus.decode(Data([0x05])) == nil)
     }
 
-    func testDecodeResignedInvalidColor() {
-        XCTAssertNil(GameStatus.decode(Data([0x05, 0xFF])))
+    @Test func decodeResignedInvalidColor() {
+        #expect(GameStatus.decode(Data([0x05, 0xFF])) == nil)
     }
 
-    func testDecodeInvalidTag() {
-        XCTAssertNil(GameStatus.decode(Data([0xFF])))
+    @Test func decodeInvalidTag() {
+        #expect(GameStatus.decode(Data([0xFF])) == nil)
     }
 
-    func testDecodeEmpty() {
-        XCTAssertNil(GameStatus.decode(Data()))
+    @Test func decodeEmpty() {
+        #expect(GameStatus.decode(Data()) == nil)
     }
 
-    func testIsTerminalFalseForNonTerminal() {
-        XCTAssertFalse(GameStatus.idle.isTerminal)
-        XCTAssertFalse(GameStatus.awaitingPieces.isTerminal)
-        XCTAssertFalse(GameStatus.inProgress.isTerminal)
+    @Test func isTerminalFalseForNonTerminal() {
+        #expect(!GameStatus.idle.isTerminal)
+        #expect(!GameStatus.awaitingPieces.isTerminal)
+        #expect(!GameStatus.inProgress.isTerminal)
     }
 
-    func testIsTerminalTrueForTerminal() {
-        XCTAssertTrue(GameStatus.checkmate(loser: .white).isTerminal)
-        XCTAssertTrue(GameStatus.checkmate(loser: .black).isTerminal)
-        XCTAssertTrue(GameStatus.stalemate.isTerminal)
-        XCTAssertTrue(GameStatus.resigned(color: .white).isTerminal)
-        XCTAssertTrue(GameStatus.resigned(color: .black).isTerminal)
+    @Test func isTerminalTrueForTerminal() {
+        #expect(GameStatus.checkmate(loser: .white).isTerminal)
+        #expect(GameStatus.checkmate(loser: .black).isTerminal)
+        #expect(GameStatus.stalemate.isTerminal)
+        #expect(GameStatus.resigned(color: .white).isTerminal)
+        #expect(GameStatus.resigned(color: .black).isTerminal)
     }
 }

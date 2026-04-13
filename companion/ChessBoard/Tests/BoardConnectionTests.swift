@@ -1,33 +1,33 @@
-import XCTest
+import Foundation
+import Testing
 
 @testable import ChessBoard
 
-@MainActor
-final class BoardConnectionTests: XCTestCase {
-    func testInitialState() {
+@MainActor @Suite struct BoardConnectionTests {
+    @Test func initialState() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
-        XCTAssertEqual(board.connectionState, .ready)
-        XCTAssertEqual(board.gameStatus, .idle)
-        XCTAssertNil(board.lastCommandResult)
+        #expect(board.connectionState == .ready)
+        #expect(board.gameStatus == .idle)
+        #expect(board.lastCommandResult == nil)
     }
 
-    func testConfigureAndStartSetsPlayerTypes() {
+    @Test func configureAndStartSetsPlayerTypes() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.configureAndStart(white: .human, black: .remote)
-        XCTAssertEqual(board.whitePlayerType, .human)
-        XCTAssertEqual(board.blackPlayerType, .remote)
+        #expect(board.whitePlayerType == .human)
+        #expect(board.blackPlayerType == .remote)
     }
 
-    func testConfigureAndStartGuardsNotReady() {
+    @Test func configureAndStartGuardsNotReady() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .scanning
         board.configureAndStart(white: .human, black: .remote)
-        XCTAssertNil(board.whitePlayerType)
+        #expect(board.whitePlayerType == nil)
     }
 
-    func testResignClearsLastCommandResult() {
+    @Test func resignClearsLastCommandResult() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.lastCommandResult = CommandResult(
@@ -36,58 +36,58 @@ final class BoardConnectionTests: XCTestCase {
             error: nil
         )
         board.resign(color: .white)
-        XCTAssertNil(board.lastCommandResult)
+        #expect(board.lastCommandResult == nil)
     }
 
-    func testHumanColor() {
+    @Test func humanColor() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.whitePlayerType = .human
         board.blackPlayerType = .remote
-        XCTAssertEqual(board.humanColor, .white)
+        #expect(board.humanColor == .white)
     }
 
-    func testHumanColorBothHuman() {
+    @Test func humanColorBothHuman() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.whitePlayerType = .human
         board.blackPlayerType = .human
-        XCTAssertNil(board.humanColor)
+        #expect(board.humanColor == nil)
     }
 
-    func testConnectionTimedOutFromScanning() {
+    @Test func connectionTimedOutFromScanning() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .scanning
         board.connectionTimedOut()
-        XCTAssertEqual(board.connectionState, .notFound)
+        #expect(board.connectionState == .notFound)
     }
 
-    func testConnectionTimedOutFromConnecting() {
+    @Test func connectionTimedOutFromConnecting() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .connecting
         board.connectionTimedOut()
-        XCTAssertEqual(board.connectionState, .connectionFailed)
+        #expect(board.connectionState == .connectionFailed)
     }
 
-    func testConnectionTimedOutFromDiscovering() {
+    @Test func connectionTimedOutFromDiscovering() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .discoveringServices
         board.connectionTimedOut()
-        XCTAssertEqual(board.connectionState, .setupFailed)
+        #expect(board.connectionState == .setupFailed)
     }
 
-    func testResignColorAfterReconnect() {
+    @Test func resignColorAfterReconnect() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.gameStatus = .inProgress
-        XCTAssertNil(board.resignColor)
+        #expect(board.resignColor == nil)
 
         board.whitePlayerType = .human
         board.blackPlayerType = .remote
-        XCTAssertEqual(board.resignColor, .white)
+        #expect(board.resignColor == .white)
     }
 
-    func testResignColorHumanVsHuman() {
+    @Test func resignColorHumanVsHuman() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.gameStatus = .inProgress
@@ -95,26 +95,26 @@ final class BoardConnectionTests: XCTestCase {
             "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
         board.whitePlayerType = .human
         board.blackPlayerType = .human
-        XCTAssertEqual(board.resignColor, .black)
+        #expect(board.resignColor == .black)
     }
 
-    func testResignColorHumanVsHumanNoPosition() {
+    @Test func resignColorHumanVsHumanNoPosition() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.gameStatus = .inProgress
         board.whitePlayerType = .human
         board.blackPlayerType = .human
-        XCTAssertNil(board.resignColor)
+        #expect(board.resignColor == nil)
     }
 
-    func testResignColorNilWhenPlayersUnset() {
+    @Test func resignColorNilWhenPlayersUnset() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.gameStatus = .inProgress
-        XCTAssertNil(board.resignColor)
+        #expect(board.resignColor == nil)
     }
 
-    func testCancelGameClearsLastCommandResult() {
+    @Test func cancelGameClearsLastCommandResult() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.lastCommandResult = CommandResult(
@@ -123,10 +123,10 @@ final class BoardConnectionTests: XCTestCase {
             error: nil
         )
         board.cancelGame()
-        XCTAssertNil(board.lastCommandResult)
+        #expect(board.lastCommandResult == nil)
     }
 
-    func testSubmitMoveClearsLastCommandResult() {
+    @Test func submitMoveClearsLastCommandResult() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.lastCommandResult = CommandResult(
@@ -135,10 +135,10 @@ final class BoardConnectionTests: XCTestCase {
             error: nil
         )
         board.submitMove("e2e4")
-        XCTAssertNil(board.lastCommandResult)
+        #expect(board.lastCommandResult == nil)
     }
 
-    func testSubmitMoveTooLongIsIgnored() {
+    @Test func submitMoveTooLongIsIgnored() {
         let board = BoardConnection(transport: MockTransport())
         board.connectionState = .ready
         board.lastCommandResult = CommandResult(
@@ -148,18 +148,18 @@ final class BoardConnectionTests: XCTestCase {
         )
         let longMove = String(repeating: "a", count: 256)
         board.submitMove(longMove)
-        XCTAssertNotNil(board.lastCommandResult)
+        #expect(board.lastCommandResult != nil)
     }
 
-    func testConfigureAndStartWritesCorrectBytes() {
+    @Test func configureAndStartWritesCorrectBytes() {
         let transport = MockTransport()
         let board = BoardConnection(transport: transport)
         board.connectionState = .ready
 
         board.configureAndStart(white: .human, black: .remote)
 
-        XCTAssertEqual(transport.writeCallCount, 1)
-        XCTAssertEqual(transport.writeArgs[0].data, Data([0x00, 0x01]))
-        XCTAssertEqual(transport.writeArgs[0].characteristic, GATT.startGame)
+        #expect(transport.writeCallCount == 1)
+        #expect(transport.writeArgs[0].data == Data([0x00, 0x01]))
+        #expect(transport.writeArgs[0].characteristic == GATT.startGame)
     }
 }
