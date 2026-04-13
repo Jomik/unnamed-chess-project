@@ -258,10 +258,12 @@ struct NewGameView: View {
 }
 
 #if DEBUG
-    #Preview("Idle", traits: .modifier(MockBoard())) {
+    #Preview("Idle") {
         NavigationStack { NewGameView() }
+            .mockBoard()
     }
-    #Preview("Lichess Remote", traits: .modifier(MockBoard())) {
+    #Preview("Lichess Remote") {
         NavigationStack { NewGameView() }
+            .mockBoard()
     }
 #endif

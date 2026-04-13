@@ -94,34 +94,24 @@ struct ScanView: View {
 }
 
 #if DEBUG
-    #Preview(
-        "Scanning",
-        traits: .modifier(MockBoard(connectionState: .scanning))
-    ) {
+    #Preview("Scanning") {
         NavigationStack { ScanView() }
+            .mockBoard(connectionState: .scanning)
     }
-    #Preview(
-        "Not Found",
-        traits: .modifier(MockBoard(connectionState: .notFound))
-    ) {
+    #Preview("Not Found") {
         NavigationStack { ScanView() }
+            .mockBoard(connectionState: .notFound)
     }
-    #Preview(
-        "Connection Failed",
-        traits: .modifier(MockBoard(connectionState: .connectionFailed))
-    ) {
+    #Preview("Connection Failed") {
         NavigationStack { ScanView() }
+            .mockBoard(connectionState: .connectionFailed)
     }
-    #Preview(
-        "Setup Failed",
-        traits: .modifier(MockBoard(connectionState: .setupFailed))
-    ) {
+    #Preview("Setup Failed") {
         NavigationStack { ScanView() }
+            .mockBoard(connectionState: .setupFailed)
     }
-    #Preview(
-        "Powered Off",
-        traits: .modifier(MockBoard(connectionState: .poweredOff))
-    ) {
+    #Preview("Powered Off") {
         NavigationStack { ScanView() }
+            .mockBoard(connectionState: .poweredOff)
     }
 #endif
