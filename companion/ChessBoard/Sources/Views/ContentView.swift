@@ -19,19 +19,16 @@ struct ContentView: View {
 }
 
 #if DEBUG
-    #Preview("Ready - New Game", traits: .modifier(MockBoard())) {
+    #Preview("Ready - New Game") {
         ContentView()
+            .mockBoard()
     }
-    #Preview(
-        "Scanning",
-        traits: .modifier(MockBoard(connectionState: .scanning))
-    ) {
+    #Preview("Scanning") {
         ContentView()
+            .mockBoard(connectionState: .scanning)
     }
-    #Preview(
-        "In Progress",
-        traits: .modifier(MockBoard(gameStatus: .inProgress))
-    ) {
+    #Preview("In Progress") {
         ContentView()
+            .mockBoard(gameStatus: .inProgress)
     }
 #endif

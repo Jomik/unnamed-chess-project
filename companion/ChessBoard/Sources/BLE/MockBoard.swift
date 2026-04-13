@@ -1,17 +1,17 @@
 #if DEBUG
     import SwiftUI
 
-    /// A PreviewModifier that creates a MockTransport-backed BoardConnection
-    /// and injects it into the environment.
-    struct MockBoard: PreviewModifier {
-        var connectionState: ConnectionState = .ready
-        var gameStatus: GameStatus = .idle
-        var currentPosition: String? = nil
-        var lastCommandResult: CommandResult? = nil
-        var whitePlayerType: PlayerType? = .human
-        var blackPlayerType: PlayerType? = .remote
-
-        func body(content: Content, context: Void) -> some View {
+    extension View {
+        /// Creates a MockTransport-backed BoardConnection and injects it into
+        /// the environment. This is a convenience method for SwiftUI Previews.
+        func mockBoard(
+            connectionState: ConnectionState = .ready,
+            gameStatus: GameStatus = .idle,
+            currentPosition: String? = nil,
+            lastCommandResult: CommandResult? = nil,
+            whitePlayerType: PlayerType? = .human,
+            blackPlayerType: PlayerType? = .remote
+        ) -> some View {
             let board = BoardConnection(transport: MockTransport())
             board.connectionState = connectionState
             board.gameStatus = gameStatus
@@ -19,7 +19,7 @@
             board.lastCommandResult = lastCommandResult
             board.whitePlayerType = whitePlayerType
             board.blackPlayerType = blackPlayerType
-            return content.environment(board)
+            return self.environment(board)
         }
     }
 #endif

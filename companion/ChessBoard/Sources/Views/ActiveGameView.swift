@@ -78,38 +78,28 @@ struct ActiveGameView: View {
 }
 
 #if DEBUG
-    #Preview(
-        "Awaiting Pieces",
-        traits: .modifier(MockBoard(gameStatus: .awaitingPieces))
-    ) {
+    #Preview("Awaiting Pieces") {
         NavigationStack { ActiveGameView() }
+            .mockBoard(gameStatus: .awaitingPieces)
     }
-    #Preview(
-        "In Progress",
-        traits: .modifier(
-            MockBoard(
+    #Preview("In Progress") {
+        NavigationStack { ActiveGameView() }
+            .mockBoard(
                 gameStatus: .inProgress,
                 currentPosition:
                     "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
             )
-        )
-    ) {
-        NavigationStack { ActiveGameView() }
     }
-    #Preview(
-        "Checkmate",
-        traits: .modifier(MockBoard(gameStatus: .checkmate(loser: .black)))
-    ) {
+    #Preview("Checkmate") {
         NavigationStack { ActiveGameView() }
+            .mockBoard(gameStatus: .checkmate(loser: .black))
     }
-    #Preview(
-        "Resigned",
-        traits: .modifier(MockBoard(gameStatus: .resigned(color: .white)))
-    ) {
+    #Preview("Resigned") {
         NavigationStack { ActiveGameView() }
+            .mockBoard(gameStatus: .resigned(color: .white))
     }
-    #Preview("Stalemate", traits: .modifier(MockBoard(gameStatus: .stalemate)))
-    {
+    #Preview("Stalemate") {
         NavigationStack { ActiveGameView() }
+            .mockBoard(gameStatus: .stalemate)
     }
 #endif
